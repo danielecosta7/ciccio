@@ -1,0 +1,28 @@
+# Ciccio
+
+> Ciccio è una sala controllo open source (AGPL-3.0) e self-hosted per gli agenti di Claude Code. Si installa su un server Ubuntu 24.04: ogni progetto (un repo git) ha il suo agente Claude Code, chiuso in una sandbox; l'utente li segue, risponde e approva i permessi dal browser, dal telefono (come app web installabile) o dall'app desktop per Mac e Windows. Usa l'abbonamento Claude dell'utente (Pro, Max, Team o Enterprise), non una chiave API. Interfaccia e documentazione in italiano.
+
+Fatti chiave:
+- Un agente Claude Code per ogni repo; griglia con lo stato (al lavoro, fermo, aspetta te); chat, diff e file per progetto.
+- «Ciccio» è l'agente responsabile: riepilogo del mattino, smista i messaggi all'agente giusto, coordina lavori tra progetti.
+- Permessi per chat; le azioni che contano diventano card da approvare, anche dalle notifiche.
+- Sicurezza: sandbox bubblewrap (l'agente scrive solo nel suo repo), firewall in uscita con domini consentiti, accesso solo dalla rete Tailscale con passkey, release di app e companion firmate Ed25519.
+- Niente chiavi API: con ANTHROPIC_API_KEY nell'ambiente, Ciccio non la passa alle sessioni; le chat agentiche sono provate solo con il login dell'abbonamento.
+- Requisiti: Ubuntu 24.04 (x86_64 o arm64, 2 CPU, 4 GB RAM), abbonamento Claude a pagamento, account Tailscale; GitHub facoltativo.
+- Installazione: `git clone https://github.com/danielecosta7/ciccio ciccio-setup && bash ciccio-setup/deploy/setup.sh` come root (procedura guidata, rilanciabile).
+- Companion (Mac e Windows): gli agenti usano i programmi del PC acceso, i file e 1Password, con conferma sul PC.
+- Routine a orari fissi, voce (Whisper e Piper in locale, facoltativa), app desktop con notifiche.
+
+## Documentazione
+
+- [README](https://github.com/danielecosta7/ciccio/blob/main/README.md): presentazione, requisiti, installazione breve, domande frequenti
+- [Installazione e aggiornamenti](https://github.com/danielecosta7/ciccio/blob/main/docs/installazione.md): tutti i passi di setup.sh, installazione a mano, aggiornare
+- [Configurazione](https://github.com/danielecosta7/ciccio/blob/main/docs/configurazione.md): variabili di ~/.config/ciccio.env
+- [Sicurezza e connessioni esterne](https://github.com/danielecosta7/ciccio/blob/main/docs/sicurezza.md)
+- [Documentazione tecnica](https://github.com/danielecosta7/ciccio/blob/main/docs/tecnico.md): server, sandbox, companion, app desktop, protocolli
+- [Release](https://github.com/danielecosta7/ciccio/releases/latest): app desktop e companion firmati
+
+## Facoltativo
+
+- [Sviluppo](https://github.com/danielecosta7/ciccio/blob/main/docs/sviluppo.md)
+- [Avvisi di terze parti](https://github.com/danielecosta7/ciccio/blob/main/THIRD_PARTY_NOTICES.md): Claude Agent SDK e Claude Code sono software proprietario di Anthropic

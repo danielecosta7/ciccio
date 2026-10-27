@@ -11,7 +11,7 @@ Regole imposte agli agenti: niente push su `main`/`master` (bloccato), lavoro su
 
 ## Sviluppo
 
-Cosa serve per ogni parte (Node, pnpm, Bun, Swift, Rust, Python): [README](../README.md#sviluppo).
+Cosa serve per ogni parte (Node, pnpm, Bun, Swift, Rust, Python): [sviluppo.md](sviluppo.md).
 
 ```bash
 pnpm install
@@ -23,7 +23,7 @@ pnpm dev:web      # interfaccia su Vite con proxy verso il server
 
 Gira come servizio systemd di un utente senza sudo (negli esempi `ciccio`), in ascolto su 127.0.0.1: dalla tailnet ci arriva `tailscale serve` (vedi [Accesso](#accesso)).
 
-Installazione: `deploy/setup.sh`, come root, guida tutti i passi (vedi il [README](../README.md#installazione)); `--check` stampa lo stato, `--step NOME` rifà un passo, `--yes` accetta i default. Ogni passo ha un controllo (`check_<passo>`, senza effetti) e un'azione (`do_<passo>`) che finisce con una verifica. La parte dell'utente gira con `runuser -l <utente>` e `XDG_RUNTIME_DIR=/run/user/<uid>` (per `systemctl --user`); root non scrive mai nella home dell'utente: file e cartelle lì li crea l'utente stesso, così un link simbolico non fa scrivere root altrove. Node e modelli della voce li scarica e controlla root (che il firewall in uscita non limita), poi li installa l'utente. Il login di claude.ai lo fa l'utente con il Claude Code dell'SDK (`claude auth login --claudeai`), dopo `install.sh`: Ciccio usa solo l'abbonamento, e le variabili di accesso a consumo (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, Bedrock, Vertex, Foundry) non passano alle sessioni (`config.ts`).
+Installazione: `deploy/setup.sh`, come root, guida tutti i passi (vedi [installazione.md](installazione.md)); `--check` stampa lo stato, `--step NOME` rifà un passo, `--yes` accetta i default. Ogni passo ha un controllo (`check_<passo>`, senza effetti) e un'azione (`do_<passo>`) che finisce con una verifica. La parte dell'utente gira con `runuser -l <utente>` e `XDG_RUNTIME_DIR=/run/user/<uid>` (per `systemctl --user`); root non scrive mai nella home dell'utente: file e cartelle lì li crea l'utente stesso, così un link simbolico non fa scrivere root altrove. Node e modelli della voce li scarica e controlla root (che il firewall in uscita non limita), poi li installa l'utente. Il login di claude.ai lo fa l'utente con il Claude Code dell'SDK (`claude auth login --claudeai`), dopo `install.sh`: Ciccio usa solo l'abbonamento, e le variabili di accesso a consumo (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, Bedrock, Vertex, Foundry) non passano alle sessioni (`config.ts`).
 
 **Copia di root.** Root non esegue mai script che l'utente di Ciccio (o un agente che riuscisse a scrivere nella sua home) può modificare: `setup.sh`, `egress-firewall.sh`, gli helper e i loro installatori stanno in `/usr/local/lib/ciccio`, di root. `setup.sh --step copia-root` li prende dal clone da cui root ha lanciato setup.sh o, se è già la copia di root, da `~utente/ciccio/deploy` letto come l'utente; mostra le differenze (`diff -u`) e chiede prima di installarle (da `~utente/ciccio` la risposta proposta è no, e con `--yes` non le installa); poi aggiorna gli helper di `/usr/local/sbin` che sono cambiati. `install.sh` confronta le impronte sha256 e, se gli script di root sono diversi da quelli del repo, stampa il comando. L'utente di Ciccio è scritto in `/etc/ciccio/user`: gli script di root lo usano quando non lo ricevono come argomento.
 
@@ -35,7 +35,7 @@ Riavvio senza perdere lavoro (`server/src/restart.ts`):
 - All'avvio le chat al lavoro (e Ciccio) riprendono da sole con un messaggio che spiega l'interruzione, dopo che i PC collegati prima sono tornati (al massimo `CICCIO_RESUME_PC_WAIT_S`, 30 s). Le chat ferme sull'utente ritrovano la card: alla risposta il giro riprende, e un permesso consentito vale per lo stesso passo rifatto. Poi ripartono i messaggi in coda.
 - Niente cicli: dopo due riprese di fila senza un giro finito, o dopo un crash (nessun registro dello spegnimento), la chat resta ferma con una nota e «Continua» tra i suggerimenti.
 
-Configurazione in `~/.config/ciccio.env` (variabili `CICCIO_*`, vedi `server/src/config.ts`), permessi 600. La prima installazione lo scrive commentato, con ogni variabile e il suo default (`install.sh env` scrive solo quello); tutte le variabili, con i default, sono nel [README](../README.md#configurazione). Obbligatorie, `install.sh` si ferma senza:
+Configurazione in `~/.config/ciccio.env` (variabili `CICCIO_*`, vedi `server/src/config.ts`), permessi 600. La prima installazione lo scrive commentato, con ogni variabile e il suo default (`install.sh env` scrive solo quello); tutte le variabili, con i default, sono in [configurazione.md](configurazione.md). Obbligatorie, `install.sh` si ferma senza:
 - `CICCIO_OWNER_NAME`: il nome con cui Ciccio e gli agenti chiamano chi li usa (nei prompt, nelle note di STATUS.md: «## Serve da <nome>»).
 - `CICCIO_ORIGINS`: gli indirizzi https da cui si apre Ciccio, separati da virgola; il primo è quello dei link. Di solito quello di Tailscale (`https://<server>.<tailnet>.ts.net`), più un dominio pubblico se c'è.
 

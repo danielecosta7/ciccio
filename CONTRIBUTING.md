@@ -11,7 +11,7 @@ Grazie dell'interesse. Ciccio è nato come strumento personale ed è diventato o
 ## Pull request
 
 1. Un fork, un branch per modifica, una PR piccola e su un solo argomento.
-2. `pnpm install`, poi `pnpm typecheck` e `pnpm build` devono passare (la CI li rifà a ogni PR, con le prove del companion che girano su Linux). Se tocchi il companion o l'app desktop, fai girare i loro test (`companion/test`, `desktop/test`) dove puoi. Cosa serve per compilare ogni parte: [README](README.md#sviluppo).
+2. `pnpm install`, poi `pnpm typecheck` e `pnpm build` devono passare (la CI li rifà a ogni PR, con le prove del companion che girano su Linux). Se tocchi il companion o l'app desktop, fai girare i loro test (`companion/test`, `desktop/test`) dove puoi. Cosa serve per compilare ogni parte: [docs/sviluppo.md](docs/sviluppo.md).
 3. Scrivi come il codice intorno: stessi nomi, stessa densità di commenti. Commenti, messaggi e testi dell'interfaccia sono in italiano, con frasi brevi e dirette.
 4. Niente dati personali nel codice: il nome dell'utente arriva da `CICCIO_OWNER_NAME` (`OWNER` nel server), gli indirizzi da `CICCIO_ORIGINS`.
 5. Nella PR spiega cosa cambia e perché, e come l'hai provato.

@@ -1,0 +1,49 @@
+# Sito del progetto su GitHub Pages (https://danielecosta7.github.io/ciccio/): la cartella sito/ così com'è, più le
+# immagini di docs/immagini (una copia sola nel repo) e i caratteri di Ciccio presi dalle dipendenze.
+name: Sito
+
+on:
+  push:
+    branches: [main]
+    paths: ['sito/**', 'docs/immagini/**', '.github/workflows/sito.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  pubblica:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Caratteri
+        run: |
+          corepack enable
+          corepack pnpm install --frozen-lockfile --ignore-scripts
+      - name: Prepara la cartella
+        run: |
+          mkdir -p _sito/immagini _sito/caratteri
+          cp -R sito/. _sito/
+          cp -R docs/immagini/. _sito/immagini/
+          f=node_modules/@fontsource
+          cp $f/geist/files/geist-latin-{400,500,600}-normal.woff2 $f/geist-mono/files/geist-mono-latin-400-normal.woff2 \
+            $f/silkscreen/files/silkscreen-latin-400-normal.woff2 _sito/caratteri/
+          cp web/public/favicon.svg web/public/apple-touch-icon.png _sito/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _sito
+      - id: deploy
+        uses: actions/deploy-pages@v4
