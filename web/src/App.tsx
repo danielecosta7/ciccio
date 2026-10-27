@@ -692,6 +692,15 @@ export function App() {
   }
 }
 
+/** Anteprima nella card: la prima riga dell'agente è markdown; qui va letta come testo, senza backtick né asterischi. */
+function plainLine(s: string): string {
+  return s.replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+\.\s+)/, '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|~~)(.+?)\1/g, '$2')
+    .replace(/`+([^`]*)`+/g, '$1')
+    .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, '$1$2');
+}
+
 function AgentCard({ a, index, selected, pending, onDecide, onOpen, compact = false }: {
   a: AgentView; index: number; selected: boolean; pending: Approval[];
   onDecide: (id: string, allow: boolean, always?: boolean) => void; onOpen: (chatId?: string) => void;
@@ -718,8 +727,8 @@ function AgentCard({ a, index, selected, pending, onDecide, onOpen, compact = fa
       className={`cc-card flex cursor-pointer flex-col gap-2.5 rounded-[12px] border p-4 text-left ${compact ? '' : 'min-h-[136px]'} ${selected ? 'bg-panel-hi' : 'bg-panel'} ${border}`}>
       <div className="flex w-full items-start justify-between gap-2.5">
         <span className="flex min-w-0 flex-col">
-          <span className="break-all text-[15px] font-semibold">{a.name}</span>
-          {a.name !== a.id && <span className="break-all font-mono text-[11px] text-muted">{a.id}</span>}
+          <span title={a.name} className="overflow-hidden text-ellipsis text-[15px] font-semibold">{a.name}</span>
+          {a.name !== a.id && <span title={a.id} className="overflow-hidden text-ellipsis font-mono text-[11px] text-muted">{a.id}</span>}
           {a.name === a.id && <span className="sr-only">repo {a.id}</span>}
         </span>
         <StatusPill status={first ? 'wait' : a.status} />
@@ -758,7 +767,7 @@ function AgentCard({ a, index, selected, pending, onDecide, onOpen, compact = fa
             {pending.length > 1 && <span className="text-[12px] text-muted">+ altri {pending.length - 1} in attesa</span>}
           </motion.div>
         ) : (
-          <motion.div key="line" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.14 } }} className={`${compact ? 'line-clamp-2' : 'line-clamp-3'} text-[14px] leading-relaxed text-soft`}>{a.line}</motion.div>
+          <motion.div key="line" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.14 } }} className={`${compact ? 'line-clamp-2' : 'line-clamp-3'} text-[14px] leading-relaxed text-soft`}>{plainLine(a.line)}</motion.div>
         )}
       </AnimatePresence>
       <div className="mt-auto flex w-full items-center justify-between gap-2 font-mono text-[12px] text-muted">

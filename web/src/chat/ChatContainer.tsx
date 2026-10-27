@@ -62,7 +62,11 @@ export function ChatContainerContent({ children, className = '', ...props }: Cha
  * Pulsante per tornare in fondo (ScrollButton di prompt-kit, nello stile di Ciccio): compare quando non sei in fondo,
  * e diventa «↓ nuovi messaggi» se intanto è arrivato qualcosa. `signal` cambia a ogni novità della chat.
  */
-export function ScrollButton({ signal, className = '' }: { signal?: unknown; className?: string }) {
+export function ScrollButton({ signal, className = '', corner = false }: {
+  signal?: unknown; className?: string;
+  /** Riquadro stretto (Ciccio in dashboard): piccolo nell'angolo in basso a destra, nel margine accanto al testo. */
+  corner?: boolean;
+}) {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
   const [fresh, setFresh] = useState(false);
   const first = useRef(true);
@@ -75,7 +79,7 @@ export function ScrollButton({ signal, className = '' }: { signal?: unknown; cla
     <AnimatePresence>
       {!isAtBottom && (
         <motion.button key="giu" {...pop} type="button" onClick={() => void scrollToBottom()} aria-label="Torna in fondo"
-          className={`cc-press absolute left-1/2 z-10 -translate-x-1/2 rounded-full text-[13px] font-semibold shadow-lg ${fresh ? 'bg-acid px-3.5 py-1.5 text-ink' : 'flex h-9 w-9 items-center justify-center border border-line-hi bg-panel text-soft hover:text-text'} ${className}`}>
+          className={`cc-press absolute z-10 rounded-full text-[13px] font-semibold shadow-lg ${corner ? 'right-0' : 'left-1/2 -translate-x-1/2'} ${fresh ? 'bg-acid px-3.5 py-1.5 text-ink' : `flex ${corner ? 'h-7 w-7' : 'h-9 w-9'} items-center justify-center border border-line-hi bg-panel text-soft hover:text-text`} ${className}`}>
           {fresh ? '↓ nuovi messaggi' : (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
           )}

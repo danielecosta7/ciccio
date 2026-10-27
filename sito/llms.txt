@@ -4,7 +4,7 @@
 
 Fatti chiave:
 - Un agente Claude Code per ogni repo; griglia con lo stato (al lavoro, fermo, aspetta te); chat, diff e file per progetto.
-- «Ciccio» è l'agente responsabile: riepilogo del mattino, smista i messaggi all'agente giusto, coordina lavori tra progetti.
+- «Ciccio» è un orchestratore: un agente Claude sopra gli agenti dei progetti. Scrive agli agenti in nome dell'utente, aspetta le loro risposte e passa il lavoro da un progetto all'altro; gli agenti scrivono a lui (le chat non si parlano direttamente). Crea progetti e chat, gestisce routine e riepilogo del mattino, usa i connettori claude.ai e la ricerca web. Per consentire un permesso serve sempre l'utente.
 - Permessi per chat; le azioni che contano diventano card da approvare, anche dalle notifiche.
 - Sicurezza: sandbox bubblewrap (l'agente scrive solo nel suo repo), firewall in uscita con domini consentiti, accesso solo dalla rete Tailscale con passkey, release di app e companion firmate Ed25519.
 - Niente chiavi API: con ANTHROPIC_API_KEY nell'ambiente, Ciccio non la passa alle sessioni; le chat agentiche sono provate solo con il login dell'abbonamento.

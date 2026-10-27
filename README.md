@@ -16,7 +16,7 @@
   <a href="docs/installazione.md">Guida completa</a>
 </p>
 
-**Ciccio** è una sala controllo open source per gli agenti di [Claude Code](https://code.claude.com). Lo installi sul tuo server: ogni progetto (un repo git) ha il suo agente, che lavora chiuso in una sandbox. Tu li vedi tutti in una griglia, rispondi alle loro domande e approvi quello che conta dal browser, dal telefono o dall'app desktop. Ciccio, il «responsabile», ti fa il riepilogo del mattino e passa ogni richiesta all'agente giusto.
+**Ciccio** è una sala controllo open source per gli agenti di [Claude Code](https://code.claude.com). Lo installi sul tuo server: ogni progetto (un repo git) ha il suo agente, che lavora chiuso in una sandbox. E sopra gli agenti c'è **Ciccio, un vero orchestratore**: gli chiedi un lavoro che tocca più progetti e lui lo divide, scrive a ogni agente, aspetta le risposte, passa i risultati da uno all'altro e alla fine ti dice com'è andata. Tu segui tutto in una griglia e approvi quello che conta dal browser, dal telefono o dall'app desktop.
 
 Usa il tuo abbonamento Claude (Pro, Max, Team o Enterprise), non una chiave API. L'interfaccia è in italiano.
 
@@ -36,7 +36,7 @@ Usa il tuo abbonamento Claude (Pro, Max, Team o Enterprise), non una chiave API.
 <table>
   <tr>
     <td width="50%"><img src="docs/immagini/chat-permesso.png" alt="Chat dell'agente negozio-online con la richiesta di permesso per un comando Bash e i pulsanti Consenti, Consenti sempre, Rifiuta"><br><sub><b>La chat di un agente</b>: passaggi, file toccati e il permesso da dare.</sub></td>
-    <td width="50%"><img src="docs/immagini/ciccio.png" alt="Ciccio risponde con il riepilogo di tutti i progetti e dice da dove partire"><br><sub><b>Ciccio</b> ti dice chi ti aspetta e da dove partire.</sub></td>
+    <td width="50%"><img src="docs/immagini/ciccio.png" alt="Ciccio risponde con il riepilogo di tutti i progetti e dice da dove partire"><br><sub><b>Ciccio</b>, l'orchestratore: ti dice chi ti aspetta e da dove partire.</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/immagini/modifiche.png" alt="Le modifiche del branch di un progetto, file per file, con il diff aperto"><br><sub><b>Le modifiche</b> del branch, file per file.</sub></td>
@@ -52,11 +52,31 @@ Usa il tuo abbonamento Claude (Pro, Max, Team o Enterprise), non una chiave API.
 </p>
 
 - **Un agente per ogni progetto.** Ogni repo ha il suo agente, con le sue chat, i diff, i file e la stessa potenza di Claude Code.
+- **Ciccio orchestra.** Coordina gli agenti al posto tuo: passa il lavoro da un progetto all'altro, crea progetti e chat, ti fa il riepilogo del mattino. [Come funziona ↓](#ciccio-lorchestratore)
 - **Prima chi aspetta te.** La griglia mostra chi lavora, chi è fermo e chi ti aspetta. Le richieste di permesso arrivano come card, anche nelle notifiche: Consenti o Rifiuta con un tocco.
-- **Ciccio, il responsabile.** Riepilogo del mattino, messaggi passati all'agente giusto, lavori che coinvolgono più progetti.
 - **Dal telefono come dal PC.** Si installa sul telefono come un'app, con notifiche e voce; c'è anche l'app desktop per Mac e Windows.
 - **Routine.** Messaggi che partono da soli a orari fissi: «ogni lunedì alle 8 fai il punto delle PR».
 - **I tuoi PC al servizio degli agenti.** Con il companion (Mac e Windows) un agente può usare i programmi del PC acceso, i file e le chiavi di 1Password, sempre dopo il tuo ok.
+
+## Ciccio, l'orchestratore
+
+<p align="center"><img src="docs/immagini/orchestra.png" alt="Schema dell'orchestrazione: chiedi a Ciccio di aggiungere le previsioni orarie ad api-meteo e usarle in app-ricette; Ciccio scrive ad api-meteo, riceve la risposta, passa il lavoro ad app-ricette, riceve la risposta e ti dice che ci sono due PR da rivedere" width="100%"></p>
+
+<p align="center">
+  <img src="docs/immagini/demo-orchestra.gif" alt="Nella chat di Ciccio Giulia chiede di aggiungere le previsioni orarie ad api-meteo e usarle in app-ricette; Ciccio scrive ad api-meteo, riceve la risposta, passa il lavoro ad app-ricette e riassume con i link alle due PR" width="100%">
+  <br><sub>Chiedi una cosa a Ciccio: la passa ad api-meteo, aspetta la risposta, gira il lavoro ad app-ricette e ti riporta le due PR.</sub>
+</p>
+
+Ciccio non è solo una chat in più: è un agente Claude con i suoi strumenti, che lavora **sopra** gli agenti dei progetti.
+
+- **Vede tutto.** Lo stato di ogni agente, le novità, le loro chat e il loro `STATUS.md`; legge il codice di tutti i progetti.
+- **Scrive agli agenti in tuo nome**, nella chat in corso, in una precisa o in una nuova, con un'istruzione chiara e completa.
+- **Aspetta e concatena.** Quando un agente finisce, la risposta torna a Ciccio, che decide il passo dopo: passare il lavoro a un altro progetto, rispondere all'agente o dirti il risultato in una frase.
+- **Gli agenti chiedono a lui.** Le chat non si parlano tra loro: se a un agente serve qualcosa da un altro progetto, scrive a Ciccio, che coordina.
+- **Gestisce il lavoro.** Crea progetti nuovi (repo su GitHub, clone e prima chat), apre, ferma e comprime le chat, cambia modello e livello, imposta le routine.
+- **Usa i tuoi strumenti.** Connettori del tuo account claude.ai (posta, calendario, Notion…), ricerca sul web, e ci parli anche a voce.
+
+I permessi che contano restano tuoi: Ciccio te li porta, ma per consentire serve sempre il tuo ok.
 
 ## Come funziona
 
@@ -137,7 +157,7 @@ No, e non va usata. Ciccio funziona con il login del tuo abbonamento claude.ai, 
 Ciccio è gratis e open source. Paghi il tuo abbonamento Claude (i limiti di utilizzo sono quelli del tuo piano, condivisi da tutti gli agenti) e il server.
 
 **Che differenza c'è con Claude Code?**
-Gli agenti sono Claude Code. Ciccio ci aggiunge quello che serve per farne lavorare tanti insieme: un server sempre acceso, un agente per progetto, la sandbox, i permessi dal telefono, le notifiche, il riepilogo, le routine.
+Gli agenti sono Claude Code. Ciccio ci aggiunge quello che serve per farne lavorare tanti insieme: un orchestratore che li coordina, un server sempre acceso, un agente per progetto, la sandbox, i permessi dal telefono, le notifiche, il riepilogo, le routine.
 
 **I miei dati dove vanno?**
 Restano sul tuo server. Le richieste ai modelli vanno ad Anthropic con il tuo account, come con Claude Code. L'elenco completo delle connessioni esterne è in [docs/sicurezza.md](docs/sicurezza.md#connessioni-esterne).

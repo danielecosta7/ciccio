@@ -95,7 +95,7 @@ function ChatRowItem({ chat, active, onOpen }: { chat: ChatView; active: boolean
       ) : (
         // Al passaggio del mouse il titolo sfuma poco prima dei pulsanti: sotto di loro resta lo sfondo vero della riga
         // (anche il velo arancio di chi aspetta te), niente riquadro pieno che lo copre.
-        <button type="button" onClick={onOpen} onDoubleClick={() => setEditing(true)} className="flex min-w-0 flex-1 items-center gap-2 text-left group-focus-within:[mask-image:linear-gradient(to_right,#000_calc(100%-80px),transparent_calc(100%-58px))] group-hover:[mask-image:linear-gradient(to_right,#000_calc(100%-80px),transparent_calc(100%-58px))]" title={`${chat.title} · doppio clic per rinominare`}>
+        <button type="button" onClick={onOpen} onDoubleClick={() => setEditing(true)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left group-focus-within:[mask-image:linear-gradient(to_right,#000_calc(100%-70px),transparent_calc(100%-50px))] group-hover:[mask-image:linear-gradient(to_right,#000_calc(100%-70px),transparent_calc(100%-50px))]" title={`${chat.title} · doppio clic per rinominare`}>
           <span className={`min-w-0 flex-1 truncate text-[13px] ${active ? 'text-text' : 'text-soft'}`}>{chat.title}</span>
           {chat.running
             ? <span className="cc-dots3 flex-none" aria-label="al lavoro"><i /><i /><i /></span>
@@ -188,7 +188,7 @@ export function ProjectNav(props: {
               <AnimatePresence initial={false}>
                 {isOpen && (
                   <motion.div key="chats" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1, transition: smooth }} exit={{ height: 0, opacity: 0, transition: quick }} className="overflow-hidden">
-                    <div className="flex flex-col gap-0.5 py-0.5 pl-5">
+                    <div className="flex flex-col gap-0.5 py-0.5 pl-4">
                       <AnimatePresence initial={false}>
                       {chats.map((c) => (coarse
                         ? <TouchChatRow key={c.id} chat={c} active={c.id === props.currentChatId} onOpen={() => props.onOpenChat(a.id, c.id)} />

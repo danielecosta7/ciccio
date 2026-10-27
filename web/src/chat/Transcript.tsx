@@ -151,6 +151,15 @@ export function Transcript(props: {
     for (let k = i; k >= 0 && !mine(messages[k]); k -= 1) if (assistant(messages[k]) && messages[k].text.trim()) parts.unshift(messages[k].text.trim());
     return parts.length ? parts.join('\n\n') : null;
   };
+  /** Il «copia» va sotto l'ultimo testo del turno, anche se dopo vengono solo passaggi: mai da solo sotto i passaggi. */
+  const copyAt = (i: number): string | null => {
+    let end = i;
+    while (end + 1 < messages.length && !mine(messages[end + 1])) {
+      end += 1;
+      if (assistant(messages[end]) && messages[end].text.trim()) return null;
+    }
+    return turnText(end);
+  };
   const lastMine = !lastReal || mine(lastReal);
 
   /** Un passaggio dentro il blocco: strumento o ragionamento (`current`: quello a cui l'agente sta lavorando). */
@@ -224,7 +233,7 @@ export function Transcript(props: {
         let prev = g.first - 1;
         while (prev >= 0 && isNote(messages[prev])) prev -= 1;
         const starts = prev < 0 || mine(messages[prev]);
-        const done = turnText(g.last);
+        const done = g.run ? null : copyAt(g.last);
         const before = messages[g.first - 1];
         // Il testo in diretta e il messaggio salvato che lo sostituisce hanno la stessa chiave (il messaggio che li
         // precede): è lo stesso elemento che cambia solo testo, senza rimontare, quindi non cambia altezza né sfarfalla.
@@ -250,9 +259,10 @@ export function Transcript(props: {
       })}
 
       <AnimatePresence initial={false}>
+      {/* Deciso: si chiude in altezza (anche lo spazio sopra), così la chat lo segue senza scatti verso l'alto. */}
       {(props.dockPermissions ? [] : onlyPermissions(approvals)).map((a) => (
-        <motion.div key={a.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: smooth }} exit={{ opacity: 0, scale: 0.97, transition: quick }}
-          className="cc-glow flex flex-col gap-2.5 rounded-[12px] border border-wait/45 bg-wait/[.06] p-3.5">
+        <motion.div key={a.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: smooth }} exit={{ opacity: 0, height: 0, paddingTop: 0, paddingBottom: 0, borderWidth: 0, marginTop: -16, transition: quick }}
+          className="cc-glow flex flex-col gap-2.5 overflow-hidden rounded-[12px] border border-wait/45 bg-wait/[.06] p-3.5">
           <div className="cc-wrap text-[13px] font-semibold text-wait">Permesso richiesto · {toolLabel(a.tool)}</div>
           <ApprovalDetail a={a} />
           {approvalParts(a).reason && <div className="text-[12px] text-muted">{approvalParts(a).reason}</div>}

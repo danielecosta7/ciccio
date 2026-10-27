@@ -275,9 +275,10 @@ export function AgentPanel(props: {
           ? <PanelSteps key={`passi:${g.items[0].id}`} items={g.items} />
           : <Bubble key={g.items[0].id} m={g.items[0]} agentName={agent.name} fileBase={fileBaseOf(agent.id, chat?.id)} onOpenFile={props.onOpenFile} />)}
         <AnimatePresence initial={false}>
+        {/* Deciso: si chiude in altezza (anche lo spazio sopra), così la chat lo segue senza scatti verso l'alto. */}
         {onlyPermissions(approvals).map((a) => (
-          <motion.div key={a.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: smooth }} exit={{ opacity: 0, scale: 0.97, transition: quick }}
-            className="cc-glow flex flex-col gap-2.5 rounded-[12px] border border-wait/45 bg-wait/[.06] p-3.5">
+          <motion.div key={a.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: smooth }} exit={{ opacity: 0, height: 0, paddingTop: 0, paddingBottom: 0, borderWidth: 0, marginTop: -10, transition: quick }}
+            className="cc-glow flex flex-col gap-2.5 overflow-hidden rounded-[12px] border border-wait/45 bg-wait/[.06] p-3.5">
             <div className="cc-wrap text-[13px] font-semibold text-wait">Permesso · {toolLabel(a.tool)}</div>
             <ApprovalDetail a={a} />
             {approvalParts(a).reason && <div className="text-[12px] text-muted">{approvalParts(a).reason}</div>}

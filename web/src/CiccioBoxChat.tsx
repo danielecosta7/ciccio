@@ -43,7 +43,7 @@ export function CiccioBoxChat(props: {
             empty="Chiedimi come stanno gli agenti, passa un lavoro a uno di loro o fatti leggere posta e calendario."
           />
         </ChatContainerContent>
-        <ScrollButton signal={news} className="bottom-2" />
+        <ScrollButton signal={news} className="bottom-1" corner />
       </ChatContainerRoot>
     </div>
   );

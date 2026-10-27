@@ -242,6 +242,9 @@ button { font-family: inherit; }
 .cc-md a.cc-filelink:hover { border-color: var(--color-acid); }
 .cc-md a.cc-filelink::before { content: attr(data-ext); flex: none; min-width: 30px; padding: 1px 4px; border-radius: 4px; background: var(--color-line); color: var(--color-soft); font-family: var(--font-mono); font-size: 10px; line-height: 16px; text-align: center; }
 .cc-md a.cc-filelink[data-ext=""]::before { content: "FILE"; }
+.cc-md .cc-filename { min-width: 0; }
+.cc-md .cc-fileglue { white-space: nowrap; }
+.cc-md .cc-fileglue > * { white-space: normal; }
 /* Targhetta con accanto Copia e Scarica, sempre insieme sulla stessa riga. */
 .cc-md .cc-file { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; vertical-align: baseline; }
 .cc-md .cc-file > a.cc-filelink { min-width: 0; }

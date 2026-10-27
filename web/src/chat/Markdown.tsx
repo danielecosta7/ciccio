@@ -148,6 +148,11 @@ function enrich(html: string, fileBase?: string, relDir = '', linkFiles = false,
       a.setAttribute('data-file', rel);
       a.classList.add('cc-filelink');
       a.setAttribute('data-ext', (rel.split('/').pop()?.split('.').pop() ?? '').slice(0, 4).toUpperCase());
+      // Il nome va a capo dopo le barre, non a metà parola (in un contenitore flex serve un unico figlio).
+      const label = document.createElement('span');
+      label.className = 'cc-filename';
+      (a.textContent ?? '').split('/').forEach((part, i) => { if (i) label.append('/', document.createElement('wbr')); label.append(part); });
+      a.replaceChildren(label);
       // Accanto alla targhetta: copia (immagini e testo) e scarica.
       if (fileActions) {
         const name = rel.split('/').pop() ?? rel;
@@ -170,6 +175,17 @@ function enrich(html: string, fileBase?: string, relDir = '', linkFiles = false,
         act('download', FILE_DOWN, 'Scarica');
         a.replaceWith(box);
         box.append(a, acts);
+      }
+      // La punteggiatura subito dopo resta attaccata alla targhetta: un punto da solo a inizio riga no.
+      const chip = a.parentElement?.classList.contains('cc-file') ? a.parentElement : a;
+      const next = chip.nextSibling;
+      const punct = next?.nodeType === Node.TEXT_NODE ? /^[.,;:!?)»]+/.exec(next.textContent ?? '') : null;
+      if (next && punct) {
+        const glue = document.createElement('span');
+        glue.className = 'cc-fileglue';
+        chip.replaceWith(glue);
+        next.textContent = (next.textContent ?? '').slice(punct[0].length);
+        glue.append(chip, punct[0]);
       }
     }
     // Fonte sul web: icona del globo davanti; un indirizzo scritto nudo diventa un'etichetta col dominio.

@@ -27,7 +27,7 @@
     {
       "@type": "SoftwareApplication",
       "name": "Ciccio",
-      "description": "Sala controllo open source e self-hosted per gli agenti di Claude Code: un agente per ogni progetto (repo git), ognuno in una sandbox, con permessi, notifiche, voce, routine e riepilogo, dal browser, dal telefono o dall'app desktop. Usa l'abbonamento Claude dell'utente.",
+      "description": "Sala controllo open source e self-hosted per gli agenti di Claude Code, con un orchestratore (Ciccio) che coordina gli agenti e passa il lavoro tra i progetti: un agente per ogni progetto (repo git), ognuno in una sandbox, con permessi, notifiche, voce, routine e riepilogo, dal browser, dal telefono o dall'app desktop. Usa l'abbonamento Claude dell'utente.",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "Ubuntu 24.04 (server); macOS e Windows (app desktop e companion)",
       "inLanguage": "it",
@@ -44,8 +44,9 @@
       "@type": "FAQPage",
       "mainEntity": [
         { "@type": "Question", "name": "Ciccio serve una chiave API di Anthropic?", "acceptedAnswer": { "@type": "Answer", "text": "No. Ciccio funziona con il login del tuo abbonamento claude.ai (Pro, Max, Team o Enterprise), come Claude Code sul tuo PC. È costruito e provato così: con una chiave API il contesto delle chat agentiche si perderebbe. Se sul server c'è una chiave API, Ciccio non la passa agli agenti." } },
+        { "@type": "Question", "name": "Cosa fa l'orchestratore di Ciccio?", "acceptedAnswer": { "@type": "Answer", "text": "Ciccio è un agente Claude che lavora sopra gli agenti dei progetti: gli chiedi un lavoro che tocca più progetti e lui scrive a ogni agente, aspetta le risposte, passa i risultati da uno all'altro e ti riassume com'è andata. Crea anche progetti e chat, gestisce le routine e usa i connettori del tuo account claude.ai. I permessi li concede sempre l'utente." } },
         { "@type": "Question", "name": "Quanto costa Ciccio?", "acceptedAnswer": { "@type": "Answer", "text": "Ciccio è gratis e open source (AGPL-3.0). Paghi il tuo abbonamento Claude e il server, anche un VPS da pochi euro." } },
-        { "@type": "Question", "name": "Che differenza c'è tra Ciccio e Claude Code?", "acceptedAnswer": { "@type": "Answer", "text": "Gli agenti di Ciccio sono Claude Code. Ciccio aggiunge quello che serve per farne lavorare tanti insieme: un server sempre acceso, un agente per progetto, la sandbox, i permessi dal telefono, le notifiche, il riepilogo del mattino e le routine." } },
+        { "@type": "Question", "name": "Che differenza c'è tra Ciccio e Claude Code?", "acceptedAnswer": { "@type": "Answer", "text": "Gli agenti di Ciccio sono Claude Code. Ciccio aggiunge quello che serve per farne lavorare tanti insieme: un orchestratore che li coordina, un server sempre acceso, un agente per progetto, la sandbox, i permessi dal telefono, le notifiche, il riepilogo del mattino e le routine." } },
         { "@type": "Question", "name": "Ciccio è sicuro?", "acceptedAnswer": { "@type": "Answer", "text": "Ogni agente lavora solo nel suo repo, con i comandi in una sandbox bubblewrap e un firewall in uscita che lascia passare solo i domini consentiti. Ciccio non è esposto su internet: ci si arriva con Tailscale e si entra con una passkey. Le azioni che contano diventano una richiesta da approvare." } },
         { "@type": "Question", "name": "Su cosa si installa Ciccio?", "acceptedAnswer": { "@type": "Answer", "text": "Su un server Ubuntu 24.04 (x86_64 o arm64) con 2 CPU e 4 GB di RAM, con una procedura guidata (setup.sh) che installa tutto il necessario. Lo apri dal browser, dal telefono come app, o con l'app desktop per Mac e Windows." } },
         { "@type": "Question", "name": "I miei dati dove vanno?", "acceptedAnswer": { "@type": "Answer", "text": "Codice, chat e dati restano sul tuo server. Le richieste ai modelli vanno ad Anthropic con il tuo account, come con Claude Code." } }
@@ -118,13 +119,13 @@
 <body>
 <header class="bar"><div class="w">
   <a class="logo" href="#"><svg width="28" height="28" viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="8" fill="#A6FF00"/><path fill="#070707" d="M2 2h4v1H3v2h3v1H2z"/></svg><span>CICCIO</span></a>
-  <nav><a class="opt" href="#cosa-fa">Cosa fa</a><a class="opt" href="#sicurezza">Sicurezza</a><a href="#installazione">Installazione</a><a class="opt" href="#domande">Domande</a><a href="https://github.com/danielecosta7/ciccio">GitHub</a></nav>
+  <nav><a class="opt" href="#cosa-fa">Cosa fa</a><a class="opt" href="#orchestratore">Orchestratore</a><a class="opt" href="#sicurezza">Sicurezza</a><a href="#installazione">Installazione</a><a class="opt" href="#domande">Domande</a><a href="https://github.com/danielecosta7/ciccio">GitHub</a></nav>
 </div></header>
 
 <main>
 <section class="hero" style="border-top:0"><div class="w">
   <h1>La sala controllo dei tuoi <em>agenti Claude</em>, sul tuo server.</h1>
-  <p class="lead">Ciccio è open source e self-hosted. Ogni progetto ha il suo agente Claude Code, chiuso in una sandbox. Tu li vedi tutti insieme e approvi quello che conta dal browser, dal telefono o dall'app desktop.</p>
+  <p class="lead">Ciccio è open source e self-hosted. Ogni progetto ha il suo agente Claude Code, chiuso in una sandbox. Sopra di loro c'è Ciccio, un vero orchestratore che li coordina per te. Tu segui tutto e approvi quello che conta dal browser, dal telefono o dall'app desktop.</p>
   <div class="cta">
     <a class="btn p" href="#installazione">Installa Ciccio</a>
     <a class="btn s" href="https://github.com/danielecosta7/ciccio">Codice su GitHub</a>
@@ -148,6 +149,21 @@
     <div class="card"><h3><i></i>Diff e file sotto controllo</h3><p>Le modifiche di ogni branch, file per file, e i file del progetto da cercare e aprire.</p><img src="immagini/modifiche.png" alt="Diff e file sotto controllo: schermata di Ciccio" width="1440" height="900" loading="lazy"></div>
     <div class="card"><h3><i></i>Routine a orari fissi</h3><p>«Ogni lunedì alle 8 fai il punto delle PR»: messaggi che partono da soli, con esito e consumo.</p><img src="immagini/routine.png" alt="Routine a orari fissi: schermata di Ciccio" width="1440" height="900" loading="lazy"></div>
     <div class="card"><h3><i></i>Configurazione guidata</h3><p>Una pagina ti dice cosa è a posto sul server e cosa manca, con il passo esatto per sistemarlo.</p><img src="immagini/impostazioni.png" alt="Configurazione guidata: schermata di Ciccio" width="1440" height="900" loading="lazy"></div>
+  </div>
+</div></section>
+
+<section id="orchestratore"><div class="w">
+  <h2>Ciccio, l'orchestratore</h2>
+  <p>Gli chiedi un lavoro che tocca più progetti: lui lo divide, scrive a ogni agente, aspetta le risposte, passa i risultati da uno all'altro e alla fine ti dice com'è andata.</p>
+  <img src="immagini/orchestra.png" alt="Schema dell'orchestrazione: Ciccio scrive ad api-meteo, riceve la risposta, passa il lavoro ad app-ricette e ti dice che ci sono due PR da rivedere" width="2560" height="1360" loading="lazy" style="border-radius:16px;border:1px solid var(--line)">
+  <div class="shot" style="margin-top:24px"><video autoplay muted loop playsinline poster="immagini/orchestra-chat.png" width="1200" height="750" aria-label="Ciccio passa il lavoro ad api-meteo, aspetta la risposta, lo gira ad app-ricette e riassume con le due PR"><source src="immagini/demo-orchestra.mp4" type="video/mp4"></video></div>
+  <div class="grid" style="margin-top:28px">
+    <div class="card"><h3><i></i>Vede tutto</h3><p>Lo stato di ogni agente, le novità, le loro chat e il loro STATUS.md. Legge il codice di tutti i progetti.</p></div>
+    <div class="card"><h3><i></i>Scrive, aspetta, concatena</h3><p>Manda istruzioni agli agenti in tuo nome, riceve la risposta a fine lavoro e decide il passo dopo: un altro progetto, una correzione, o il riepilogo per te.</p></div>
+    <div class="card"><h3><i></i>Gli agenti chiedono a lui</h3><p>Le chat non si parlano tra loro: se a un agente serve qualcosa da un altro progetto, scrive a Ciccio, che coordina.</p></div>
+    <div class="card"><h3><i></i>Gestisce il lavoro</h3><p>Crea progetti nuovi (repo su GitHub, clone, prima chat), apre e ferma chat, comprime il contesto, imposta le routine.</p></div>
+    <div class="card"><h3><i></i>Usa i tuoi strumenti</h3><p>Posta, calendario, Notion e gli altri connettori del tuo account claude.ai, la ricerca sul web. E ci parli anche a voce.</p></div>
+    <div class="card"><h3><i></i>I permessi restano tuoi</h3><p>Ciccio ti porta le richieste degli agenti e può rifiutarle, ma per consentire serve sempre il tuo ok.</p></div>
   </div>
 </div></section>
 
@@ -208,8 +224,9 @@ bash ciccio-setup/deploy/setup.sh</pre>
   <h2>Domande frequenti</h2>
   <p>Le risposte brevi a quello che chiedono tutti.</p>
   <details><summary>Serve una chiave API di Anthropic?</summary><p>No, e non va usata. Ciccio funziona con il login del tuo abbonamento claude.ai (Pro, Max, Team o Enterprise), come Claude Code sul tuo PC. Fa lavorare gli agenti in modalità agentica: chat lunghe che tengono il contesto da un giro all'altro, con i connettori e le skill del tuo account. Con una chiave API il contesto si perderebbe. Se sul server c'è una chiave API, Ciccio non la passa agli agenti.</p></details>
+  <details><summary>Cosa fa l'orchestratore?</summary><p>Ciccio è un agente Claude che lavora sopra gli agenti dei progetti. Gli chiedi un lavoro che tocca più progetti e lui scrive a ogni agente, aspetta le risposte, passa i risultati da uno all'altro e ti riassume com'è andata. Crea anche progetti e chat, gestisce le routine e usa i connettori del tuo account. I permessi li concedi sempre tu.</p></details>
   <details><summary>Quanto costa?</summary><p>Ciccio è gratis e open source (AGPL-3.0). Paghi il tuo abbonamento Claude, i cui limiti di utilizzo sono condivisi da tutti gli agenti, e il server.</p></details>
-  <details><summary>Che differenza c'è con Claude Code?</summary><p>Gli agenti sono Claude Code. Ciccio aggiunge quello che serve per farne lavorare tanti insieme: un server sempre acceso, un agente per progetto, la sandbox, i permessi dal telefono, le notifiche, il riepilogo del mattino e le routine.</p></details>
+  <details><summary>Che differenza c'è con Claude Code?</summary><p>Gli agenti sono Claude Code. Ciccio aggiunge quello che serve per farne lavorare tanti insieme: un orchestratore che li coordina, un server sempre acceso, un agente per progetto, la sandbox, i permessi dal telefono, le notifiche, il riepilogo del mattino e le routine.</p></details>
   <details><summary>I miei dati dove vanno?</summary><p>Restano sul tuo server. Le richieste ai modelli vanno ad Anthropic con il tuo account, come con Claude Code. L'elenco completo delle connessioni esterne è nella <a href="https://github.com/danielecosta7/ciccio/blob/main/docs/sicurezza.md">documentazione sulla sicurezza</a>.</p></details>
   <details><summary>Funziona senza server, sul mio PC?</summary><p>No: Ciccio è pensato per un server Linux sempre acceso, così gli agenti lavorano anche quando il PC è spento.</p></details>
   <details><summary>Posso usarlo da fuori casa?</summary><p>Sì, dal telefono o dal PC con Tailscale acceso, da qualunque rete. Se vuoi puoi aggiungere anche un tuo dominio.</p></details>
