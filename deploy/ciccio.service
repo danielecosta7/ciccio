@@ -1,0 +1,24 @@
+# Servizio systemd dell'utente che esegue Ciccio.
+# Installazione: deploy/install.sh
+[Unit]
+Description=Ciccio, sala controllo degli agenti
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ciccio
+EnvironmentFile=%h/.config/ciccio.env
+Environment=PATH=%h/.local/node/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Node dal PATH qui sopra: quello dell'utente in ~/.local/node se c'è, altrimenti quello di sistema.
+ExecStart=/usr/bin/env node %h/ciccio/dist/server/src/index.js
+Restart=on-failure
+RestartSec=5
+# Allo stop il SIGTERM va solo a Ciccio: annota i giri a metà e chiude i processi degli agenti da sé (restart.ts),
+# lasciando qualche secondo a quelli quasi finiti. Quello che resta dopo lo ferma systemd con SIGKILL.
+KillMode=mixed
+TimeoutStopSec=60
+MemoryMax=3G
+CPUQuota=200%
+
+[Install]
+WantedBy=default.target

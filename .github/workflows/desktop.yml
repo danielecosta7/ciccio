@@ -1,0 +1,92 @@
+# App desktop «Ciccio» (Tauri): compila il Mac (.app, .dmg, zip per l'aggiornamento) e l'installer Windows
+# con lo stesso desktop/build.sh che si usa in locale. Su Windows installa l'app in silenzio, la avvia
+# e controlla che parta e registri l'indirizzo ciccio-app:// e l'identità per le notifiche.
+# Gli artefatti sono quelli che release.yml firma e pubblica (o desktop/publish.sh, a mano).
+name: App desktop
+
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'shared/desktop.ts'
+      - 'shared/release-key.ts'
+      - 'server/src/desktop.ts'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+  # Dalla release firmata (release.yml), che prende gli artefatti da qui.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: Compila l'app, il dmg e lo zip
+        run: bash desktop/build.sh
+      - name: Prova dell'app compilata
+        run: |
+          app=dist/desktop/Ciccio.app
+          test -x "$app/Contents/MacOS/ciccio"
+          codesign --verify --verbose "$app"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ciccio-app-mac
+          path: |
+            dist/desktop/Ciccio-mac.dmg
+            dist/desktop/Ciccio-mac.zip
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: Compila l'installer
+        shell: bash
+        run: bash desktop/build.sh
+      - name: Installa, avvia e controlla
+        shell: pwsh
+        run: |
+          Start-Process -Wait -FilePath dist/desktop/Ciccio-windows-setup.exe -ArgumentList '/S'
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Ciccio" -Filter *.exe | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
+          if (-not $exe) { throw 'app non installata in %LOCALAPPDATA%\Ciccio' }
+          Write-Host "installata: $($exe.FullName)"
+          $p = Start-Process -PassThru -FilePath $exe.FullName -ArgumentList '--nascosta'
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { throw "l'app si è chiusa all'avvio (codice $($p.ExitCode))" }
+          $cmd = (Get-ItemProperty 'HKCU:\Software\Classes\ciccio-app\shell\open\command').'(default)'
+          if ($cmd -notlike "*$($exe.Name)*") { throw "ciccio-app:// non registrato: $cmd" }
+          $aumid = Get-ItemProperty 'HKCU:\Software\Classes\AppUserModelId\it.costa.ciccio'
+          if ($aumid.DisplayName -ne 'Ciccio') { throw 'AppUserModelID per le notifiche non registrato' }
+          # Seconda copia con un indirizzo ciccio-app://: passa l'indirizzo alla prima e si chiude.
+          $second = Start-Process -PassThru -FilePath $exe.FullName -ArgumentList 'ciccio-app://apri?path=%2F'
+          if (-not $second.WaitForExit(15000)) { throw 'la seconda copia non si è chiusa (istanza singola)' }
+          if ($p.HasExited) { throw 'la prima copia si è chiusa' }
+          Stop-Process -Id $p.Id -Force
+          Write-Host 'ok: avvio, indirizzo ciccio-app://, identità delle notifiche, istanza singola'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ciccio-app-windows
+          path: dist/desktop/Ciccio-windows-setup.exe
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,114 @@
+# Companion per Windows: compila l'.exe su Windows (con icona e dati del file),
+# lo prova davvero (collegamento a Ciccio, strumento via npx, stop, avvio automatico)
+# e lo lascia da scaricare come artefatto della run.
+name: Companion Windows
+
+on:
+  pull_request:
+    paths:
+      - 'companion/**'
+      - 'shared/companion.ts'
+      - 'shared/release-key.ts'
+      - 'shared/node/release.ts'
+      - 'scripts/release-key.mjs'
+      - 'server/src/companion.ts'
+      - 'server/src/releases.ts'
+      - 'server/src/auth.ts'
+      - 'server/src/policy.ts'
+      - 'server/src/bus.ts'
+      - '.github/workflows/companion-windows.yml'
+  workflow_dispatch:
+  # Dalla release firmata (release.yml), che prende l'artefatto da qui.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Dipendenze
+        shell: bash
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Controllo dei tipi
+        shell: bash
+        run: pnpm typecheck
+      - name: Prova del server file (percorsi, junction, copia, backup)
+        shell: bash
+        run: |
+          pnpm exec tsx companion/test/file.ts
+          # Anche con Bun, che è il runtime dell'.exe (lstat, junction e copie possono comportarsi diversamente).
+          bun companion/test/file.ts
+      - name: Prova del server comandi, delle proposte e della config che si ricarica
+        shell: bash
+        run: |
+          pnpm exec tsx companion/test/comandi.ts
+          bun companion/test/comandi.ts
+      - name: Prova delle migrazioni della config e della ricarica dopo un rename
+        shell: bash
+        run: |
+          pnpm exec tsx companion/test/migrazioni.ts
+          bun companion/test/migrazioni.ts
+      - name: Prova delle firme delle release e dei consensi di 1Password sul PC
+        shell: bash
+        run: |
+          pnpm exec tsx companion/test/firme.ts
+          bun companion/test/firme.ts
+      - name: Prova di scarica_da_ciccio e carica_su_ciccio (con il server di Ciccio)
+        shell: bash
+        run: pnpm exec tsx companion/test/transfer.ts
+      - name: Compila l'exe
+        shell: bash
+        run: bash companion/build.sh windows-x64
+      - name: Prova da capo a fondo
+        shell: bash
+        run: pnpm exec tsx companion/test/e2e.ts dist/companion/ciccio-companion-windows-x64.exe
+      - name: Prova dell'icona nell'area di notifica
+        shell: bash
+        run: pnpm exec tsx companion/test/tray-windows.ts dist/companion/ciccio-companion-windows-x64.exe
+      - name: Prova delle notifiche e dei permessi
+        shell: bash
+        run: pnpm exec tsx companion/test/notify-windows.ts dist/companion/ciccio-companion-windows-x64.exe
+      - name: Prova dell'aggiornamento automatico
+        shell: bash
+        run: |
+          # Chiave usa e getta solo per questa prova: la hanno dentro i due .exe di prova (fuori da dist/companion
+          # e mai pubblicati), non l'.exe compilato sopra, che resta quello dell'artefatto.
+          prova="$RUNNER_TEMP/aggiornamento"
+          mkdir -p "$prova"
+          node scripts/release-key.mjs genera > "$prova/chiave.txt"
+          awk '/BEGIN/,/END/' "$prova/chiave.txt" > "$prova/chiave.pem"
+          pub="$(grep -oE "^  '[A-Za-z0-9+/=]{44}'," "$prova/chiave.txt" | tr -d " ',")"
+          test -n "$pub"
+          cp shared/release-key.ts "$prova/release-key.ts.orig"
+          cp companion/src/config.ts "$prova/config.ts.orig"
+          # Anche con gli a capo di Windows (CRLF) del checkout: .* prende pure il \r.
+          sed -i "s#^  '[^']*',.*#  '$pub',#" shared/release-key.ts
+          grep -q "$pub" shared/release-key.ts
+          bun build companion/src/main.ts --compile --minify --target=bun-windows-x64 --outfile "$prova/ciccio-companion-prova.exe"
+          # Una "versione nuova" (9.9.9) dallo stesso codice, per vedere il companion sostituirsi da solo.
+          sed -i "s/^export const VERSION = .*/export const VERSION = '9.9.9';/" companion/src/config.ts
+          bun build companion/src/main.ts --compile --minify --target=bun-windows-x64 --outfile "$prova/ciccio-companion-next.exe"
+          cp "$prova/release-key.ts.orig" shared/release-key.ts
+          cp "$prova/config.ts.orig" companion/src/config.ts
+          git diff --exit-code -- shared/release-key.ts companion/src/config.ts
+          CICCIO_RELEASE_KEY_FILE="$prova/chiave.pem" pnpm exec tsx companion/test/update-windows.ts "$prova/ciccio-companion-prova.exe" "$prova/ciccio-companion-next.exe"
+      - name: Prova dell'avvio automatico
+        shell: pwsh
+        run: ./companion/test/windows-autostart.ps1 dist/companion/ciccio-companion-windows-x64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ciccio-companion-windows-x64
+          path: dist/companion/ciccio-companion-windows-x64.exe
+          retention-days: 30

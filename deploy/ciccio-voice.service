@@ -1,0 +1,18 @@
+[Unit]
+Description=Ciccio, servizio voce (Whisper e Piper, solo in locale)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ciccio
+ExecStart=%h/.ciccio/voice-venv/bin/python %h/ciccio/voice/service.py
+Environment=CICCIO_VOICE_MODELS=%h/.ciccio/voice-models
+Environment=CICCIO_VOICE_THREADS=4
+Environment=CICCIO_VOICE_WHISPER=whisper-base
+Restart=on-failure
+RestartSec=5
+MemoryMax=2G
+CPUQuota=380%
+
+[Install]
+WantedBy=default.target

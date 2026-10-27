@@ -1,0 +1,145 @@
+# Release firmata di companion e app desktop. Al push di un tag vX.Y.Z (uguale a "version" in package.json):
+# 1. controlla che ci siano il segreto CICCIO_RELEASE_KEY e una chiave pubblica vera in shared/release-key.ts;
+# 2. compila e prova Mac e Windows con gli stessi workflow delle pull request (companion-mac, companion-windows,
+#    desktop), richiamati da qui;
+# 3. scrive companion.json e app.json (versione, file, sha256, firma per piattaforma), firma con Ed25519 ogni file
+#    e i due manifest, ricontrolla tutto con la chiave pubblica del repo e pubblica la GitHub Release.
+# Senza segreto, con il segnaposto o con una chiave privata che non è quella del repo si ferma prima di pubblicare:
+# niente release senza firma. I server di Ciccio la scaricano con deploy/fetch-release.sh.
+# Chiave, segreto e rotazione: docs/tecnico.md, «Firma delle release».
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  controlli:
+    name: Segreto, chiave e versione
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      companion: ${{ steps.versioni.outputs.companion }}
+      app: ${{ steps.versioni.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Segreto della chiave privata
+        env:
+          # Solo se c'è o no: il valore qui non serve e non arriva.
+          CHIAVE_PRESENTE: ${{ secrets.CICCIO_RELEASE_KEY != '' }}
+        run: |
+          if [[ "$CHIAVE_PRESENTE" != true ]]; then
+            echo "::error title=Manca CICCIO_RELEASE_KEY::Il segreto CICCIO_RELEASE_KEY non c'è: senza chiave privata non si firma e non si pubblica niente. Crealo con node scripts/release-key.mjs genera (docs/tecnico.md, «Firma delle release»)."
+            exit 1
+          fi
+      - name: Chiave pubblica nel repo
+        run: |
+          if ! node scripts/release-key.mjs chiavi-del-repo; then
+            echo "::error title=Chiave pubblica segnaposto::In shared/release-key.ts c'è ancora il segnaposto: i programmi compilati da qui rifiuterebbero ogni aggiornamento. Metti la chiave pubblica stampata da node scripts/release-key.mjs genera."
+            exit 1
+          fi
+      - name: Versioni
+        id: versioni
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [[ "$TAG" != "v$version" ]]; then
+            echo "::error title=Tag e versione diversi::Il tag $TAG non è v$version (version in package.json): alza la versione, fai il commit e rifai il tag."
+            exit 1
+          fi
+          companion="$(sed -n "s/^export const VERSION = '\(.*\)';.*/\1/p" companion/src/config.ts)"
+          app="$(sed -n 's/^version = "\(.*\)".*/\1/p' desktop/src-tauri/Cargo.toml | head -1)"
+          [[ "$companion" =~ ^[0-9]+(\.[0-9]+){0,3}$ && "$app" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]] || { echo "::error::Versioni non lette: companion «$companion», app «$app»"; exit 1; }
+          echo "companion=$companion" >> "$GITHUB_OUTPUT"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "Release $TAG: companion $companion, app desktop $app" >> "$GITHUB_STEP_SUMMARY"
+
+  # Gli stessi workflow delle pull request, con tutte le loro prove: gli artefatti sono quelli che si firmano.
+  companion-mac:
+    needs: controlli
+    uses: ./.github/workflows/companion-mac.yml
+  companion-windows:
+    needs: controlli
+    uses: ./.github/workflows/companion-windows.yml
+  app:
+    needs: controlli
+    uses: ./.github/workflows/desktop.yml
+
+  pubblica:
+    name: Firma e pubblica
+    needs: [controlli, companion-mac, companion-windows, app]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Solo qui si scrive nel repo (la release) e solo qui arriva la chiave privata.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefatti
+      - name: File della release
+        run: |
+          out=dist/release
+          mkdir -p "$out"
+          cp artefatti/ciccio-companion-mac/CiccioCompanion-mac.zip artefatti/ciccio-companion-mac/CiccioCompanion-mac.dmg "$out/"
+          cp artefatti/ciccio-companion-windows-x64/ciccio-companion-windows-x64.exe "$out/CiccioCompanion-windows.exe"
+          cp artefatti/ciccio-app-mac/Ciccio-mac.zip artefatti/ciccio-app-mac/Ciccio-mac.dmg "$out/"
+          cp artefatti/ciccio-app-windows/Ciccio-windows-setup.exe "$out/"
+          ls -l "$out"
+      - name: La chiave privata è quella del repo
+        env:
+          CICCIO_RELEASE_KEY: ${{ secrets.CICCIO_RELEASE_KEY }}
+        run: |
+          pub="$(node scripts/release-key.mjs chiave-pubblica)"
+          if ! node scripts/release-key.mjs chiavi-del-repo | grep -qxF "$pub"; then
+            echo "::error title=Chiave sbagliata::La chiave privata in CICCIO_RELEASE_KEY (pubblica $pub) non è tra quelle di shared/release-key.ts: i programmi rifiuterebbero la release. Niente pubblicato."
+            exit 1
+          fi
+      - name: Manifest e firme
+        env:
+          CICCIO_RELEASE_KEY: ${{ secrets.CICCIO_RELEASE_KEY }}
+          COMPANION: ${{ needs.controlli.outputs.companion }}
+          APP: ${{ needs.controlli.outputs.app }}
+        run: |
+          node scripts/release-key.mjs manifest companion "$COMPANION" dist/release \
+            darwin-arm64=CiccioCompanion-mac.zip win32-x64=CiccioCompanion-windows.exe \
+            --installer darwin-arm64=CiccioCompanion-mac.dmg --installer win32-x64=CiccioCompanion-windows.exe
+          node scripts/release-key.mjs manifest app "$APP" dist/release \
+            darwin-arm64=Ciccio-mac.zip win32-x64=Ciccio-windows-setup.exe \
+            --installer darwin-arm64=Ciccio-mac.dmg --installer win32-x64=Ciccio-windows-setup.exe
+      - name: Controllo delle firme con la chiave del repo
+        run: node scripts/release-key.mjs verifica dist/release
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          COMPANION: ${{ needs.controlli.outputs.companion }}
+          APP: ${{ needs.controlli.outputs.app }}
+        run: |
+          pub="$(node scripts/release-key.mjs chiavi-del-repo | head -1)"
+          cat > "$RUNNER_TEMP/note.md" <<EOF
+          Companion **$COMPANION** e app desktop **$APP** per Mac (Apple Silicon) e Windows (x64), firmati con la chiave delle release di Ciccio.
+
+          - Sul server di Ciccio: \`bash deploy/fetch-release.sh ${TAG#v}\` (come l'utente di Ciccio) li scarica, controlla le firme e li mette in \`~/.ciccio/downloads\`: companion e app collegati si aggiornano da soli.
+          - A mano: \`companion.json\` e \`app.json\` elencano sha256 e firma di ogni file; ogni file ha la sua firma Ed25519 in \`<file>.sig\` (base64). Chiave pubblica: \`$pub\` (anche in \`shared/release-key.ts\`). Per controllare: \`node scripts/release-key.mjs verifica <cartella con i file>\`.
+          EOF
+          pre=(); [[ "$TAG" == *-* ]] && pre=(--prerelease)
+          # Prima bozza con tutti i file, poi pubblicata: nessuno vede una release a metà.
+          gh release create "$TAG" dist/release/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "Ciccio $TAG" --notes-file "$RUNNER_TEMP/note.md" "${pre[@]}"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false

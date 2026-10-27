@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ciccio",
+  "identifier": "it.costa.ciccio",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    },
+    "macOSPrivateApi": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "nsis"
+    ],
+    "category": "DeveloperTool",
+    "copyright": "Daniele Costa, AGPL-3.0",
+    "publisher": "Daniele Costa",
+    "shortDescription": "Ciccio",
+    "longDescription": "Ciccio, la sala controllo degli agenti Claude, in una finestra con le notifiche del sistema.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-",
+      "infoPlist": "Info.plist"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Italian"
+        ],
+        "displayLanguageSelector": false,
+        "startMenuFolder": ""
+      }
+    }
+  }
+}

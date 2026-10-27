@@ -1,0 +1,36 @@
+# Controlli di base a ogni push e PR su main: dipendenze dal lockfile, tipi, compilazione di server e interfaccia,
+# e le prove del companion che girano su Linux senza niente di speciale (niente finestre, niente .exe).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Dipendenze
+        run: |
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+      - name: Controllo dei tipi
+        run: pnpm typecheck
+      - name: Compilazione
+        run: pnpm build
+      - name: Prove del companion (file, comandi, migrazioni, trasferimenti)
+        run: |
+          pnpm exec tsx companion/test/file.ts
+          pnpm exec tsx companion/test/comandi.ts
+          pnpm exec tsx companion/test/migrazioni.ts
+          pnpm exec tsx companion/test/transfer.ts

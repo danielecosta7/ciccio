@@ -1,0 +1,14 @@
+# Schermo virtuale per i programmi grafici degli agenti (OpenSCAD, PyVista, FreeCAD…), sul display :50.
+# Gira fuori dalla sandbox: dentro, /tmp è in sola lettura e Xvfb non può creare il suo file di blocco.
+# Gli agenti lo trovano già in DISPLAY (server/src/display.ts). Installazione: deploy/install.sh
+[Unit]
+Description=Ciccio, schermo virtuale degli agenti
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/Xvfb :50 -screen 0 1920x1200x24 -nolisten tcp
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

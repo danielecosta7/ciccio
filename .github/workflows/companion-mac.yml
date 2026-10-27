@@ -1,0 +1,59 @@
+# Companion per Mac: compila Ciccio Companion.app su un Mac (Apple Silicon) con lo stesso build-app.sh
+# che si usa in locale, e lascia da scaricare lo zip per l'aggiornamento automatico e il .dmg
+# per la prima installazione. Così si pubblica una versione nuova anche quando il Mac è spento.
+name: Companion Mac
+
+on:
+  pull_request:
+    paths:
+      - 'companion/**'
+      - 'shared/companion.ts'
+      - 'shared/release-key.ts'
+      - 'shared/node/release.ts'
+      - '.github/workflows/companion-mac.yml'
+  workflow_dispatch:
+  # Dalla release firmata (release.yml), che prende l'artefatto da qui.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Dipendenze
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Controllo dei tipi
+        run: pnpm typecheck
+      - name: Compila l'app e il dmg
+        run: bash companion/mac/build-app.sh
+      - name: Zip per l'aggiornamento automatico
+        run: |
+          rm -f dist/companion/CiccioCompanion-mac.zip
+          ditto -c -k --keepParent "dist/companion/Ciccio Companion.app" dist/companion/CiccioCompanion-mac.zip
+          ls -l dist/companion
+      - name: Prova dell'app compilata
+        run: |
+          app="dist/companion/Ciccio Companion.app"
+          test -x "$app/Contents/MacOS/CiccioCompanion"
+          "$app/Contents/Resources/ciccio-companion" version
+          codesign --verify --verbose "$app"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ciccio-companion-mac
+          path: |
+            dist/companion/CiccioCompanion-mac.zip
+            dist/companion/CiccioCompanion-mac.dmg
+          if-no-files-found: error

@@ -1,0 +1,6 @@
+# Script, servizio voce e unità systemd girano su Linux: sempre con a capo LF, anche se il clone è fatto su Windows.
+*.sh text eol=lf
+*.py text eol=lf
+*.service text eol=lf
+*.caddy text eol=lf
+deploy/** text eol=lf

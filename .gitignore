@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.*
+*.bun-build
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+# Voce: ambiente Python e modelli, se li prepari nel repo per le prove (sul server stanno in ~/.ciccio).
+__pycache__/
+.venv/
+voice-models/
+# Worktree delle sessioni di Claude Code.
+.claude/worktrees/

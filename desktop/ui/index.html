@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ciccio</title>
+<!-- Pagina dell'app prima di Ciccio: indirizzo del server (primo avvio), collegamento (codice da confermare
+     nel browser) ed errori di rete. -->
+<style>
+  :root { color-scheme: dark; --ink: #0b0b0b; --panel: #151515; --line: #2a2a2a; --text: #ececec; --muted: #9a9aa2; --acid: #a6ff00; --block: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  body { display: flex; align-items: center; justify-content: center; padding: 16px; -webkit-user-select: none; user-select: none; }
+  main { width: 100%; max-width: 400px; display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); text-align: center; }
+  img { width: 56px; height: 56px; image-rendering: pixelated; }
+  p { margin: 0; color: var(--muted); }
+  .code { font: 600 30px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .14em; color: var(--text); -webkit-user-select: text; user-select: text; }
+  button { width: 100%; min-height: 46px; border: 0; border-radius: 999px; background: var(--acid); color: var(--ink); font: 600 15px/1 inherit; cursor: pointer; }
+  button.ghost { background: none; border: 1px solid var(--line); color: var(--text); }
+  button:disabled { opacity: .5; cursor: default; }
+  form { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+  input { width: 100%; min-height: 46px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--ink); color: var(--text); font: inherit; -webkit-user-select: text; user-select: text; }
+  input:focus { outline: none; border-color: var(--acid); }
+  .err { color: var(--block); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--acid); animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <img src="icon.png" alt="">
+  <div id="avvio"><div class="dot"></div></div>
+  <p id="testo">Mi collego a Ciccio…</p>
+  <form id="server" hidden>
+    <p>Scrivi l'indirizzo del tuo Ciccio, quello che apri nel browser (per esempio https://ciccio.tuo-tailnet.ts.net).</p>
+    <input id="indirizzo" type="text" inputmode="url" placeholder="https://" autocomplete="url" autocapitalize="off" spellcheck="false" required>
+    <p id="server-err" class="err" hidden></p>
+    <button id="continua" type="submit">Continua</button>
+  </form>
+  <div id="codice" hidden>
+    <p style="margin-bottom:14px">Per collegare l'app, scrivi questo codice in Ciccio, Impostazioni › App, dal browser in cui entri con la passkey.</p>
+    <div class="code" id="code"></div>
+  </div>
+  <button id="browser" hidden>Apri Ciccio nel browser</button>
+  <button id="riprova" class="ghost" hidden>Riprova</button>
+</main>
+<script>
+  const T = window.__TAURI__;
+  const $ = (id) => document.getElementById(id);
+  function show(s) {
+    const fase = s && s.fase || 'avvio';
+    $('avvio').hidden = fase !== 'avvio';
+    $('server').hidden = fase !== 'server';
+    $('codice').hidden = fase !== 'codice';
+    $('browser').hidden = fase !== 'codice';
+    $('riprova').hidden = fase !== 'errore';
+    $('testo').hidden = fase === 'codice' || fase === 'server';
+    $('testo').className = fase === 'errore' ? 'err' : '';
+    $('testo').textContent = s && s.testo || '';
+    if (fase === 'codice') $('code').textContent = s.codice;
+    if (fase === 'server') $('indirizzo').focus();
+  }
+  // Primo avvio: l'app controlla che all'indirizzo risponda Ciccio, lo salva e passa al codice.
+  $('server').onsubmit = async (e) => {
+    e.preventDefault();
+    $('server-err').hidden = true;
+    $('continua').disabled = true;
+    $('continua').textContent = 'Controllo…';
+    try {
+      await T.core.invoke('imposta_server', { indirizzo: $('indirizzo').value });
+      show({ fase: 'avvio', testo: "Collego l'app a Ciccio…" });
+    } catch (err) {
+      $('server-err').textContent = String(err);
+      $('server-err').hidden = false;
+    } finally {
+      $('continua').disabled = false;
+      $('continua').textContent = 'Continua';
+    }
+  };
+  $('browser').onclick = () => T.core.invoke('apri_browser');
+  $('riprova').onclick = () => { show({ fase: 'avvio', testo: 'Riprovo…' }); T.core.invoke('riprova'); };
+  if (T) {
+    T.event.listen('ui', (e) => show(e.payload));
+    T.core.invoke('stato').then(show);
+  }
+</script>
+</body>
+</html>
