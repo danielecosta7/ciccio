@@ -19,7 +19,7 @@ import { CREDENTIAL_TOOL, CREDENTIALS_SERVER, credentialProblem, credentialsServ
 import { EGRESS_TOOL, INSTALL_TOOL, SYSTEM_SERVER, systemServer } from './systemPackages.js';
 import { PROPOSALS, PROPOSE_COMMAND, PROPOSE_MCP, ROUTINE_TOOL, TOOLS_SERVER, projectMcpServers, projectToolHints, projectToolsServer } from './projectTools.js';
 import { subagentModelHook } from './subagents.js';
-import { agentSandbox, confine, confineHook, confineNetwork, memoryDir, noProxyWithSshHosts, prepareProjectDirs, projectEnv, repoSlug, sessionLockdown, type Scope } from './confine.js';
+import { agentSandbox, confine, confineHook, confineNetwork, memoryDir, noProxyWithSshHosts, prepareProjectDirs, projectEnv, repoSlug, sandboxGitEnv, sessionLockdown, type Scope } from './confine.js';
 import { hoistCommand, saveCommands } from './commands.js';
 import { ASK_TOOL, CICCIO_THREAD, PERMISSION_LEVELS, questionsOf, SUBAGENT_MODELS, type AgentStatus, type AgentView, type Approval, type Attachment, type ChatView, type Effort, type MessageMeta, type MessageRole, type PermissionLevel, type TodoItem, type ToolMeta, type LiveState } from '../../shared/types.js';
 
@@ -777,7 +777,8 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
   // Connettori di claude.ai: accesi per il progetto e solo con il login dell'abbonamento.
   const connectors = !!row.connectors && onSubscription();
   // Cache dei pacchetti e known_hosts del progetto (projectEnv): i comandi della sandbox scrivono solo lì.
-  const agentEnv = { ...claudeEnv, ...agentDisplay(), ...projectEnv(row.id), ENABLE_CLAUDEAI_MCP_SERVERS: connectors ? 'true' : 'false', SSH_AUTH_SOCK: ssh.path, NO_PROXY: noProxy, no_proxy: noProxy };
+  // sandboxGitEnv: git nella sandbox ignora i punti di montaggio di bubblewrap (.bashrc, .vscode…).
+  const agentEnv = { ...claudeEnv, ...agentDisplay(), ...projectEnv(row.id), ...sandboxGitEnv(row.id), ENABLE_CLAUDEAI_MCP_SERVERS: connectors ? 'true' : 'false', SSH_AUTH_SOCK: ssh.path, NO_PROXY: noProxy, no_proxy: noProxy };
   const credServer = credentialsServer(scope, state.abort.signal);
   const orchServer = orchestratorServer({ agentId: row.id, chatId, chatTitle: chat.title });
   const sysServer = systemServer({

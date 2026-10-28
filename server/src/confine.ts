@@ -95,6 +95,41 @@ export function projectEnv(project: string): Record<string, string> {
   };
 }
 
+/**
+ * Punti di montaggio della sandbox nella cartella della chat: per i file che proteggono e che non ci sono, bubblewrap
+ * mette lì un file o una cartella vuota, che dentro la sandbox `git status` vede come non tracciati (sul disco non ci
+ * sono). Sono quelli fissi di Claude Code (rc della shell, .gitconfig, .vscode, .idea, .claude/commands e agents…) e
+ * quelli di readOnlyInDir. Dalla radice del repo: più in giù sono file veri dell'utente.
+ */
+const SANDBOX_MOUNTS = [
+  '.gitconfig', '.gitmodules', '.bashrc', '.bash_profile', '.zshrc', '.zprofile', '.profile', '.ripgreprc', '.mcp.json',
+  '.vscode/', '.idea/', '.claude/', '.ciccio/worktrees/',
+];
+
+/**
+ * Variabili d'ambiente per i comandi della sandbox: git ignora i punti di montaggio (core.excludesFile), così un
+ * `git add -A` dell'agente non li committa. Il file sta nella cartella del progetto (la sandbox la legge, non la
+ * scrive) e riporta in fondo le esclusioni globali dell'utente, che core.excludesFile altrimenti sostituirebbe.
+ * Non tocca il repo né il suo .gitignore; il git del server, fuori dalla sandbox, non lo usa.
+ */
+export function sandboxGitEnv(project: string): Record<string, string> {
+  const file = P.join(projectDirs(project).root, 'git-exclude');
+  let global = '';
+  try {
+    let src = '';
+    try { src = gitSync(['config', '--global', '--path', '--get', 'core.excludesFile'], { timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* non impostato */ }
+    src ||= P.join(process.env.XDG_CONFIG_HOME || P.join(HOME, '.config'), 'git', 'ignore');
+    global = fs.readFileSync(src, 'utf8');
+  } catch { /* nessuna esclusione globale */ }
+  try {
+    fs.writeFileSync(file, ['# Scritto da Ciccio: punti di montaggio della sandbox.', ...SANDBOX_MOUNTS.map((p) => `/${p}`), '', global].join('\n'), { mode: 0o644 });
+  } catch (e) {
+    console.warn(`Esclusioni git di ${project} non scritte:`, (e as Error).message);
+    return {};
+  }
+  return { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.excludesFile', GIT_CONFIG_VALUE_0: file };
+}
+
 // ---------------------------------------------------------------- zone vietate
 
 /** Zone che nessun agente legge o scrive, a parte le eccezioni del suo progetto. */

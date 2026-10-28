@@ -64,7 +64,8 @@ const lnkAumid = ps(`$f = Get-Item -LiteralPath '${lnk.replace(/'/g, "''")}'; (N
 ok(lnkAumid === AUMID, `il collegamento porta l'AppUserModelID (${lnkAumid})`);
 
 // ── Primo avvio: prima la guida ai permessi ───────────────────────────────
-ok(await wait(() => countProcs('permissions.ps1') > 0, 30_000), 'al primo avvio si apre «Permessi di Ciccio Companion»');
+// 60 secondi: sui runner di GitHub PowerShell a volte ci mette più di 30 a far comparire il processo.
+ok(await wait(() => countProcs('permissions.ps1') > 0, 60_000), 'al primo avvio si apre «Permessi di Ciccio Companion»');
 ok(/icona · finestra dei permessi/.test(log()), 'registro: finestra dei permessi');
 ps(`Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*permissions.ps1*' -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`);
 
