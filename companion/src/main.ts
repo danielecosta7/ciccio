@@ -7,6 +7,7 @@ import { LocalServers } from './servers.js';
 import { ciccioTransfer } from './transfer.js';
 import { CiccioLink } from './link.js';
 import { OnePasswordGuard } from './consensi.js';
+import { PcBridges } from './ponte.js';
 import { install, installed, startTray, uninstall } from './service.js';
 import { needsTrayMigration, requestTrayAction, runTray } from './tray.js';
 import { dialog } from './windows-ui.js';
@@ -311,10 +312,12 @@ async function main() {
   log(`Ciccio Companion ${VERSION} · ${servers.size} server MCP: ${[...servers.keys()].join(', ') || 'nessuno'}${background ? ' · in background' : ''}`);
   // Le notifiche le mostra solo l'app dell'icona (Mac o Windows), se l'opzione è attiva.
   // 1Password: segreti e firme SSH solo con il consenso di chi è al PC (finestra o elenco nella config).
-  const link = new CiccioLink(cfg.server, cfg.token, servers, cfg.notifications && underTray(), new OnePasswordGuard(configPath));
+  // Ponti SSH: solo verso le destinazioni di ssh.ponti, che si aggiungono con la finestra del PC.
+  const link = new CiccioLink(cfg.server, cfg.token, servers, cfg.notifications && underTray(), new OnePasswordGuard(configPath), new PcBridges(configPath));
   // Config cambiata (a mano o da una proposta accettata sul PC): server nuovi, tolti o cambiati, senza Ricollega.
   local.onAdded = (s) => link.attach(s);
   local.onChanged = () => link.serversChanged();
+  local.onReloaded = () => link.bridgesChanged();
   void local.startAll();
   local.watch();
   link.connect();
@@ -341,6 +344,15 @@ async function main() {
   // Windows: Ctrl+Interr e chiusura della finestra (SIGHUP arriva qualche secondo prima della chiusura).
   process.on('SIGBREAK', () => void quit('Ctrl+Interr'));
   process.on('SIGHUP', () => void quit('finestra chiusa'));
+  // Sotto l'app dell'icona: se l'app sparisce di colpo (chiusa a forza, senza passare dalla sua uscita) il
+  // companion resterebbe acceso da solo, senza nessuno che mostri le notifiche. Lo si scrive e si esce:
+  // l'app, quando riparte, ne avvia uno nuovo.
+  const tray = process.env.CICCIO_COMPANION_TRAY === '1' ? process.ppid : 0;
+  if (tray > 1) {
+    setInterval(() => {
+      try { process.kill(tray, 0); } catch { void quit(`l'app dell'icona (pid ${tray}) non c'è più`); }
+    }, 5000).unref();
+  }
 }
 
 main().catch(async (err: Error) => {

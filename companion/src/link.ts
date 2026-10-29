@@ -1,6 +1,8 @@
 import os from 'node:os';
 import WebSocket from 'ws';
-import { COMPANION_PATH, COMPANION_PROTOCOL, SECRET_READ_METHOD, SSH_AGENT_METHOD, type CallParams, type HelloParams, type NotifyParams, type RpcId, type UpdateParams } from '../../shared/companion.js';
+import { COMPANION_PATH, COMPANION_PROTOCOL, SECRET_READ_METHOD, SSH_AGENT_METHOD, SSH_BRIDGE_CLOSE, SSH_BRIDGE_DATA, SSH_BRIDGE_ID, SSH_BRIDGE_MAX, SSH_BRIDGE_OPEN, SSH_BRIDGE_PROPOSE, SSH_BRIDGE_REMOVE, SSH_BRIDGES_CHANGED, type CallParams, type HelloParams, type NotifyParams, type RpcId, type UpdateParams } from '../../shared/companion.js';
+import { BridgeTable } from '../../shared/node/ponte.js';
+import { PcBridges } from './ponte.js';
 import { onePasswordFeatures, readSecret, sshAgentRequest } from './onepassword.js';
 import { OnePasswordGuard } from './consensi.js';
 import fs from 'node:fs';
@@ -34,9 +36,18 @@ export class CiccioLink {
   private problem = '';
   private updater: Updater;
   private usage = new UsageReporter((msg) => this.send(msg));
+  /** Ponti SSH aperti adesso (ponte.ts) e la destinazione di ognuno; quelli in apertura contano nel limite. */
+  private bridges = new BridgeTable({ send: (m) => this.send(m), buffered: () => this.ws?.bufferedAmount ?? 0 });
+  private bridgeTargets = new Map<string, string>();
+  private opening = 0;
+  /** Ultimo elenco dei ponti consentiti detto a Ciccio. */
+  private advertised = '';
 
-  /** `guard`: i consensi sul PC per 1Password (consensi.ts); di base solo finestre, senza elenco nella config. */
-  constructor(private serverUrl: string, private token: string, private servers: Map<string, LocalServer>, private notifications = false, private guard = new OnePasswordGuard(null)) {
+  /**
+   * `guard`: i consensi sul PC per 1Password (consensi.ts); di base solo finestre, senza elenco nella config.
+   * `ponti`: i ponti SSH consentiti su questo PC (ponte.ts); di base nessuno.
+   */
+  constructor(private serverUrl: string, private token: string, private servers: Map<string, LocalServer>, private notifications = false, private guard = new OnePasswordGuard(null), private ponti = new PcBridges(null, null)) {
     this.updater = new Updater(serverUrl, token, () => this.calls.size > 0);
     for (const s of servers.values()) this.attach(s);
     setStatus({ server: serverUrl });
@@ -46,7 +57,22 @@ export class CiccioLink {
     setInterval(() => {
       const now = JSON.stringify(onePasswordFeatures());
       if (now !== op) { op = now; this.send({ jsonrpc: '2.0', method: 'companion/onepassword', params: JSON.parse(now) }); }
+      // Ponti cambiati a mano senza che il controllo della config se ne accorgesse: al più un minuto dopo.
+      this.bridgesChanged();
     }, 60_000).unref();
+  }
+
+  /**
+   * I ponti SSH consentiti sono cambiati (config ricaricata, proposta accettata, voce tolta): Ciccio lo sa subito
+   * e i ponti aperti verso una destinazione non più consentita si chiudono.
+   */
+  bridgesChanged() {
+    const targets = this.ponti.targets();
+    for (const [id, key] of this.bridgeTargets) if (!targets.includes(key)) this.bridges.close(id, `${key} non è più consentito sul PC`);
+    const json = JSON.stringify(targets);
+    if (json === this.advertised || this.ws?.readyState !== WebSocket.OPEN) return;
+    this.advertised = json;
+    this.send({ jsonrpc: '2.0', method: SSH_BRIDGES_CHANGED, params: { targets } });
   }
 
   /** Un server nuovo nella mappa (config ricaricata): Ciccio saprà dei suoi cambiamenti. */
@@ -82,7 +108,9 @@ export class CiccioLink {
       this.problem = '';
       this.backoff = 1000;
       this.alive();
-      const hello: HelloParams = { protocol: COMPANION_PROTOCOL, version: VERSION, platform: `${os.platform()}-${os.arch()}`, servers: this.states(), notifications: this.notifications, onePassword: onePasswordFeatures() };
+      const sshBridges = this.ponti.targets();
+      this.advertised = JSON.stringify(sshBridges);
+      const hello: HelloParams = { protocol: COMPANION_PROTOCOL, version: VERSION, platform: `${os.platform()}-${os.arch()}`, servers: this.states(), notifications: this.notifications, onePassword: onePasswordFeatures(), sshBridges };
       this.send({ jsonrpc: '2.0', method: 'companion/hello', params: hello });
     });
     ws.on('ping', () => this.alive());
@@ -96,6 +124,8 @@ export class CiccioLink {
       this.ws = null;
       for (const c of this.calls.values()) c.abort();
       this.calls.clear();
+      // I ponti vivono con il collegamento: dall'altra parte Ciccio chiude i suoi.
+      this.bridges.closeAll('collegamento con Ciccio caduto');
       if (this.stopped) return;
       if (code === 4001) { this.rejected = true; setStatus({ rejected: true, problem: reason.toString() || 'dispositivo rimosso' }); log(`${red('✗')} Ciccio ha chiuso: ${reason.toString() || 'dispositivo rimosso'}`); }
       else if (code === 4000) log(`${yellow('○')} un altro companion con lo stesso token si è collegato a Ciccio`);
@@ -167,6 +197,9 @@ export class CiccioLink {
       if (id != null) this.calls.get(id)?.abort();
       return;
     }
+    if (msg.method === SSH_BRIDGE_DATA) { this.bridges.data(msg.params); return; }
+    if (msg.method === SSH_BRIDGE_CLOSE) { this.bridges.remoteClose(msg.params); return; }
+    if ((msg.method === SSH_BRIDGE_OPEN || msg.method === SSH_BRIDGE_PROPOSE || msg.method === SSH_BRIDGE_REMOVE) && msg.id != null) { void this.bridge(msg.id, msg.method, msg.params); return; }
     if (msg.method === 'tools/call' && msg.id != null) void this.call(msg.id, msg.params as CallParams);
     if ((msg.method === SSH_AGENT_METHOD || msg.method === SECRET_READ_METHOD) && msg.id != null) void this.onePassword(msg.id, msg.method, msg.params);
   }
@@ -207,6 +240,51 @@ export class CiccioLink {
     }
   }
 
+  /**
+   * Ponti SSH: aprirne uno (solo verso una destinazione di ssh.ponti), proporne uno nuovo (finestra sul PC) o
+   * toglierlo. Nel registro va la destinazione e quanti byte sono passati, mai il contenuto.
+   */
+  private async bridge(id: RpcId, method: string, params: unknown) {
+    const ctrl = new AbortController();
+    this.calls.set(id, ctrl);
+    const p = (params ?? {}) as { id?: unknown; host?: unknown; port?: unknown; motivo?: unknown };
+    try {
+      if (method === SSH_BRIDGE_PROPOSE) {
+        const esito = await this.ponti.propose(p.host, p.port, p.motivo, ctrl.signal);
+        if (esito === 'consentito') this.bridgesChanged();
+        this.send({ jsonrpc: '2.0', id, result: { esito } });
+      } else if (method === SSH_BRIDGE_REMOVE) {
+        const tolto = this.ponti.remove(p.host, p.port);
+        this.bridgesChanged();
+        this.send({ jsonrpc: '2.0', id, result: { tolto } });
+      } else {
+        const bid = typeof p.id === 'string' && SSH_BRIDGE_ID.test(p.id) ? p.id : null;
+        if (!bid || this.bridges.has(bid)) throw new Error('ponte non valido o già aperto');
+        if (this.bridges.size + this.opening >= SSH_BRIDGE_MAX) throw new Error(`già ${SSH_BRIDGE_MAX} ponti SSH aperti da questo PC: chiudine uno`);
+        const ws = this.ws;
+        this.opening++;
+        let opened: Awaited<ReturnType<PcBridges['connect']>>;
+        try { opened = await this.ponti.connect(p.host, p.port); } finally { this.opening--; }
+        // Collegamento caduto (o sostituito) nel frattempo: niente ponte.
+        if (this.ws !== ws || ws?.readyState !== WebSocket.OPEN || ctrl.signal.aborted) { opened.sock.destroy(); throw new Error('richiesta annullata'); }
+        this.send({ jsonrpc: '2.0', id, result: { ok: true } });
+        this.bridgeTargets.set(bid, opened.key);
+        const via = opened.key.startsWith(`${opened.address}:`) ? '' : dim(` (${opened.address})`);
+        log(`→ ponte SSH ${dim(bid)} verso ${opened.key}${via}`);
+        this.bridges.attach(bid, opened.sock, (reason, st) => {
+          this.bridgeTargets.delete(bid);
+          log(`← ponte SSH ${dim(bid)} verso ${opened.key} chiuso: ${reason} ${dim(`(${st.sent} byte inviati, ${st.received} ricevuti, ${Math.round(st.ms / 1000)} s)`)}`);
+        });
+      }
+    } catch (err) {
+      const message = ctrl.signal.aborted ? 'richiesta annullata' : (err as Error).message;
+      log(`← ponte SSH · ${yellow(message)}`);
+      this.send({ jsonrpc: '2.0', id, error: { code: -32000, message } });
+    } finally {
+      this.calls.delete(id);
+    }
+  }
+
   private async call(id: RpcId, p: CallParams) {
     const server = p && this.servers.get(p.server);
     if (!server) { this.send({ jsonrpc: '2.0', id, error: { code: -32602, message: `server ${p?.server} non configurato sul PC` } }); return; }
@@ -233,6 +311,7 @@ export class CiccioLink {
     clearTimeout(this.retry);
     clearTimeout(this.silence);
     this.usage.stop();
+    this.bridges.stop('companion chiuso');
     this.ws?.close(1000, 'companion chiuso');
   }
 }

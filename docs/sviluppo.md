@@ -19,7 +19,7 @@ pnpm typecheck
 pnpm build        # interfaccia in dist/web, server in dist/server
 ```
 
-Le prove del companion che non hanno bisogno di finestre girano ovunque: `pnpm exec tsx companion/test/file.ts` (e `comandi.ts`, `migrazioni.ts`, `transfer.ts`). La CI le fa girare su Linux a ogni push e PR su `main`, insieme a `pnpm typecheck` e `pnpm build`.
+Le prove del companion che non hanno bisogno di finestre girano ovunque: `pnpm exec tsx companion/test/file.ts` (e `comandi.ts`, `migrazioni.ts`, `transfer.ts`, `ponte.ts`). La CI le fa girare su Linux a ogni push e PR su `main`, insieme a `pnpm typecheck` e `pnpm build`.
 
 Com'è fatto dentro (server, companion, app desktop, protocolli): [docs/tecnico.md](tecnico.md). Per contribuire: [CONTRIBUTING.md](../CONTRIBUTING.md).
 

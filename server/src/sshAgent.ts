@@ -44,16 +44,24 @@ const noKeys = () => frame(IDENTITIES_ANSWER, Buffer.from([0, 0, 0, 0]));
 export interface ChatSshAgent { path: string; close: () => void }
 
 /**
+ * Percorso di un socket della chat (agent SSH, ponte SSH): nella cartella dati, accessibile solo all'utente.
+ * I socket Unix hanno un limite di ~100 caratteri sul percorso: con una cartella dati lunga si va in /tmp.
+ */
+export function chatSocketPath(chatId: string, suffix = ''): string {
+  let dir = path.join(config.dataDir, 'ssh');
+  if (dir.length > 80) dir = path.join(os.tmpdir(), `ciccio-ssh-${process.getuid?.() ?? 'u'}`);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const sock = path.join(dir, `${chatId.replace(/[^\w-]/g, '')}${suffix}.sock`);
+  fs.rmSync(sock, { force: true });
+  return sock;
+}
+
+/**
  * Apre il socket della chat. `approve` chiede all'utente il permesso di firmare (true = consentito);
  * `onNote` scrive una riga nel registro della chat (es. «nessun PC con 1Password»).
  */
 export function openChatSshAgent(chatId: string, approve: () => Promise<boolean>, onNote: (text: string) => void, signal: AbortSignal): ChatSshAgent {
-  // I socket Unix hanno un limite di ~100 caratteri sul percorso: con una cartella dati lunga si va in /tmp.
-  let dir = path.join(config.dataDir, 'ssh');
-  if (dir.length > 80) dir = path.join(os.tmpdir(), `ciccio-ssh-${process.getuid?.() ?? 'u'}`);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const sock = path.join(dir, `${chatId.replace(/[^\w-]/g, '')}.sock`);
-  fs.rmSync(sock, { force: true });
+  const sock = chatSocketPath(chatId);
   let noted = false;
 
   /** session-bind@openssh.com di questo collegamento, se ssh l'ha mandato. */

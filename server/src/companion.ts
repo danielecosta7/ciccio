@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
+import type { Socket } from 'node:net';
 import type { Readable } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
@@ -14,7 +15,8 @@ import { bus } from './bus.js';
 import { failed, limited, sha } from './auth.js';
 import { settings } from './settings.js';
 import { coveredByApp } from './desktop.js';
-import { COMPANION_DOWNLOAD_PATH, COMPANION_PATH, COMPANION_PROTOCOL, COMPANION_TRANSFER_PATH, MAX_TRANSFER_BYTES, SECRET_READ_METHOD, SSH_AGENT_METHOD, TRANSFER_META, TRANSFER_TOOLS, newerVersion, serverSlug, type NotifyParams, type OnePasswordFeatures, type CallParams, type LocalServerState, type LocalTool, type RpcId, type TransferKind, type TransferParams } from '../../shared/companion.js';
+import { COMPANION_DOWNLOAD_PATH, COMPANION_PATH, COMPANION_PROTOCOL, COMPANION_TRANSFER_PATH, MAX_TRANSFER_BYTES, SECRET_READ_METHOD, SSH_AGENT_METHOD, SSH_BRIDGE_CLOSE, SSH_BRIDGE_DATA, SSH_BRIDGE_MAX, SSH_BRIDGE_OPEN, SSH_BRIDGE_PROPOSE, SSH_BRIDGE_REMOVE, SSH_BRIDGES_CHANGED, TRANSFER_META, TRANSFER_TOOLS, newerVersion, parseBridgeTarget, serverSlug, type BridgeProposal, type NotifyParams, type OnePasswordFeatures, type CallParams, type LocalServerState, type LocalTool, type RpcId, type TransferKind, type TransferParams } from '../../shared/companion.js';
+import { BridgeTable, type BridgeClosed } from '../../shared/node/ponte.js';
 import type { ChatMessage, CompanionView } from '../../shared/types.js';
 import { USAGE_METHOD } from '../../shared/consumi.js';
 import { savePcUsage } from './consumi.js';
@@ -53,6 +55,9 @@ interface Link {
   alive: boolean;
   /** Da quando è collegato (per scegliere il PC stabile tra più PC con 1Password). */
   connectedAt: number;
+  /** Ponti SSH che il PC consente ("host:porta", ssh.ponti nella sua config) e quelli aperti adesso. */
+  sshBridges: string[];
+  bridges: BridgeTable;
 }
 
 /** PC collegati adesso, per id del dispositivo. */
@@ -119,6 +124,7 @@ export function companions(): CompanionView[] {
       platform: l?.platform ?? d.platform, version: l?.version ?? d.version,
       createdAt: d.created_at, lastSeen: l ? Date.now() : d.last_seen, notifications: !!l?.notify,
       onePassword: l ? l.onePassword : null,
+      sshBridges: l ? l.sshBridges : null,
       servers: (l?.servers ?? []).map((s) => ({
         name: s.name, status: s.status, error: s.error,
         tools: s.tools.map((t) => ({ name: t.name, description: t.description?.split('\n')[0].slice(0, 200), readOnly: t.annotations?.readOnlyHint === true })),
@@ -229,6 +235,65 @@ export async function readSecretOnPc(ref: string, signal?: AbortSignal, motivo?:
   if (typeof r?.value !== 'string') throw new Error('risposta non valida dal PC');
   return r.value;
 }
+
+// ── Ponti SSH attraverso il PC ──────────────────────────────────────────
+// Per i server SSH della rete di un PC (sshBridge.ts sul server, ponte.ts sul companion). Decide il PC: si apre solo
+// verso le destinazioni che lui dice di consentire, e il PC lo ricontrolla. Se più PC consentono la stessa
+// destinazione si usa quello collegato per ultimo (di solito quello in ufficio adesso).
+
+/** "host:porta" validi, senza doppioni: quelli che il PC dice di consentire. */
+function cleanBridges(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Set<string>();
+  for (const v of raw.slice(0, 100)) { const t = typeof v === 'string' ? parseBridgeTarget(v) : null; if (t) out.add(t.key); }
+  return [...out];
+}
+
+/** PC collegato che consente questa destinazione: l'ultimo collegato. */
+function bridgeLink(key: string): Link | null {
+  return [...links.values()].filter((l) => l.sshBridges.includes(key)).sort((a, b) => b.connectedAt - a.connectedAt)[0] ?? null;
+}
+
+/** Riga per il messaggio dell'agente: i server raggiungibili adesso attraverso i PC accesi, vuota se nessuno. */
+export function bridgesPrompt(): string {
+  const parts = [...links.values()].filter((l) => l.sshBridges.length).sort((a, b) => a.device.name.localeCompare(b.device.name))
+    .map((l) => `${l.sshBridges.join(', ')} (PC "${l.device.name}")`);
+  return parts.length ? `- Server SSH raggiungibili attraverso i PC accesi (ponti SSH, ssh li usa da solo): ${parts.join('; ')}.` : '';
+}
+
+/** Nome del PC che farebbe da ponte verso host:porta, null se nessuno. */
+export function bridgePcFor(host: string, port: number): string | null {
+  const t = parseBridgeTarget(host, port);
+  return t ? bridgeLink(t.key)?.device.name ?? null : null;
+}
+
+/**
+ * Apre un ponte verso host:porta dal PC che lo consente e ci collega `sock` (che da lì in poi porta solo i byte di
+ * ssh). Prima di collegarlo chiama `ready` (il server scrive OK al client), dopo la risposta del PC e prima di
+ * qualunque byte. null se nessun PC collegato consente la destinazione; un errore con il motivo se il PC rifiuta.
+ */
+export async function openBridgeOnPc(host: string, port: number, sock: Socket, ready: (pc: string) => void, onClose: BridgeClosed, signal?: AbortSignal): Promise<{ pc: string } | null> {
+  const t = parseBridgeTarget(host, port);
+  const link = t ? bridgeLink(t.key) : null;
+  if (!t || !link) return null;
+  if (link.bridges.size >= SSH_BRIDGE_MAX) throw new Error(`già ${SSH_BRIDGE_MAX} ponti SSH aperti dal PC "${link.device.name}"`);
+  const id = `p${randomBytes(8).toString('hex')}`;
+  link.bridges.reserve(id);
+  try {
+    await request(link, SSH_BRIDGE_OPEN, { id, host: t.host, port: t.port }, 20_000, signal);
+  } catch (e) {
+    link.bridges.close(id, (e as Error).message);
+    throw e;
+  }
+  // Il PC si è scollegato mentre rispondeva: la prenotazione non c'è più.
+  if (!link.bridges.has(id)) throw new Error(`il PC "${link.device.name}" si è scollegato`);
+  ready(link.device.name);
+  link.bridges.attach(id, sock, onClose);
+  return { pc: link.device.name };
+}
+
+/** Il PC con questo id, se è collegato. */
+const linkOf = (deviceId: string) => links.get(deviceId) ?? null;
 
 /** Strumenti che le sessioni vedono per un PC: gli ultimi noti, acceso o spento. */
 const listedTools = (device: DeviceRow) => exposedTools(device, knownServers(device.id), false);
@@ -543,6 +608,13 @@ function onMessage(link: Link, raw: string) {
     return;
   }
   if (msg.method === USAGE_METHOD) { savePcUsage(link.device.id, msg.params); return; }
+  if (msg.method === SSH_BRIDGE_DATA) { link.bridges.data(msg.params); return; }
+  if (msg.method === SSH_BRIDGE_CLOSE) { link.bridges.remoteClose(msg.params); return; }
+  if (msg.method === SSH_BRIDGES_CHANGED) {
+    link.sshBridges = cleanBridges((msg.params as { targets?: unknown } | undefined)?.targets);
+    publish();
+    return;
+  }
   if (msg.method === 'companion/onepassword') {
     const op = (msg.params ?? {}) as Partial<OnePasswordFeatures>;
     link.onePassword = { sshAgent: op.sshAgent === true, cli: op.cli === true };
@@ -557,6 +629,7 @@ function onMessage(link: Link, raw: string) {
       link.notify = params.notifications === true;
       const op = (params.onePassword ?? {}) as Partial<OnePasswordFeatures>;
       link.onePassword = { sshAgent: op.sshAgent === true, cli: op.cli === true };
+      link.sshBridges = cleanBridges(params.sshBridges);
       const current = links.get(link.device.id);
       if (current && current !== link) {
         if (current.version && link.version && newerVersion(current.version, link.version)) {
@@ -608,7 +681,10 @@ export function registerCompanion(app: FastifyInstance) {
     // quando si conosce la versione: prima il nuovo sostituiva subito il vecchio, e due copie del companion con lo
     // stesso token (es. una vecchia rimasta accesa sul Mac) si buttavano fuori a vicenda ogni minuto, alternando i
     // loro elenchi di strumenti. Ogni cambio di elenco fa ripagare per intero la conversazione a tutte le sessioni.
-    const link: Link = { device, socket, platform: null, version: null, servers: [], notify: false, pending: new Map(), raw: new Map(), onePassword: { sshAgent: false, cli: false }, nextId: 1, alive: true, connectedAt: Date.now() };
+    const link: Link = {
+      device, socket, platform: null, version: null, servers: [], notify: false, pending: new Map(), raw: new Map(), onePassword: { sshAgent: false, cli: false }, nextId: 1, alive: true, connectedAt: Date.now(),
+      sshBridges: [], bridges: new BridgeTable({ send: (m) => send(link, m), buffered: () => socket.bufferedAmount }),
+    };
     if (!links.has(device.id)) { links.set(device.id, link); deviceStore.seen(device.id, null, null); }
     // Da dove arriva: dietro un proxy fidato (CICCIO_TRUST_PROXY) l'indirizzo vero, che req.ip prende da X-Forwarded-For.
     // Serve a capire chi si collega con il token di un dispositivo (es. un Mac che si risveglia da solo).
@@ -626,6 +702,8 @@ export function registerCompanion(app: FastifyInstance) {
     socket.on('close', () => {
       for (const p of [...link.pending.values()]) p.done(errorResult('Il PC si è scollegato durante la chiamata.'));
       for (const p of [...link.raw.values()]) p.reject(new Error('il PC si è scollegato'));
+      // I ponti SSH passano da questo collegamento: si chiudono con lui.
+      link.bridges.stop(`il PC "${device.name}" si è scollegato`);
       if (links.get(device.id) === link) {
         links.delete(device.id);
         deviceStore.seen(device.id, null, null);
@@ -774,6 +852,32 @@ export function registerCompanion(app: FastifyInstance) {
     }
     const r = await callOnPc(link, { server: chrome.name, name: 'list_pages', arguments: {} });
     return { ok: !r.isError, text: resultText(r) };
+  });
+
+  // Ponti SSH (Configurazione › Server SSH): proporne uno al PC, che chiede nella sua finestra, o toglierlo.
+  // Ciccio può solo chiedere: la voce la scrive il PC, e solo dopo il «Consenti» di chi è lì.
+  app.post<{ Params: { id: string }; Body: { action?: string; host?: string } }>('/api/companions/:id/ssh-bridges', async (req, reply) => {
+    const link = linkOf(req.params.id);
+    if (!link) return reply.code(409).send({ error: 'Il PC non è collegato in questo momento.' });
+    const t = parseBridgeTarget(String(req.body?.host ?? ''));
+    if (!t) return reply.code(400).send({ error: 'Scrivi host o host:porta (nome o IPv4), es. 192.168.1.50:22.' });
+    try {
+      if (req.body?.action === 'propose') {
+        // La finestra sul PC aspetta fino a 2 minuti.
+        const r = await request(link, SSH_BRIDGE_PROPOSE, { host: t.host, port: t.port }, 150_000) as { esito?: unknown };
+        const esito: BridgeProposal = r?.esito === 'consentito' || r?.esito === 'già' || r?.esito === 'rifiutato' ? r.esito : 'nessuna_risposta';
+        app.log.info(`Ponte SSH proposto al PC ${link.device.name}: ${t.key} → ${esito}`);
+        return { esito, pc: link.device.name, target: t.key };
+      }
+      if (req.body?.action === 'remove') {
+        const r = await request(link, SSH_BRIDGE_REMOVE, { host: t.host, port: t.port }, 20_000) as { tolto?: unknown };
+        app.log.info(`Ponte SSH tolto dal PC ${link.device.name}: ${t.key}`);
+        return { tolto: r?.tolto === true, pc: link.device.name, target: t.key };
+      }
+    } catch (e) {
+      return reply.code(502).send({ error: `Il PC "${link.device.name}" ha risposto: ${(e as Error).message}` });
+    }
+    return reply.code(400).send({ error: 'azione non valida' });
   });
 
   app.post<{ Params: { id: string } }>('/api/companions/:id/remove', async (req) => {

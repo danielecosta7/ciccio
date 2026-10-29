@@ -21,7 +21,8 @@ In particolare:
 - un agente, una pagina web o un link che fa approvare un permesso, usa i programmi di un PC o collega un companion senza che l'utente lo decida;
 - segreti (chiavi, token, password) che finiscono nei log, nelle chat o nei file del repo;
 - un modo per far installare a companion o app desktop un file non firmato, o di un'altra release (versione, programma o piattaforma diversi), passando dal server di Ciccio o dalla rete (vedi sotto);
-- un server di Ciccio compromesso che legge un segreto di 1Password o ottiene una firma SSH dal PC senza la conferma nella finestra del PC, o con una finestra che mostra un riferimento o un server diversi da quelli veri.
+- un server di Ciccio compromesso che legge un segreto di 1Password o ottiene una firma SSH dal PC senza la conferma nella finestra del PC, o con una finestra che mostra un riferimento o un server diversi da quelli veri;
+- un server di Ciccio compromesso (o un agente) che usa un PC con il companion come ponte verso un host o una porta che non sono in `ssh.ponti` della sua config, o che ce li fa aggiungere senza il «Consenti» nella finestra del PC.
 
 ## Limiti noti
 

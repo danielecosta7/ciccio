@@ -182,7 +182,9 @@ app.get<{ Params: { id: string }; Querystring: { chat?: string } }>('/api/agents
 });
 
 app.get<{ Params: { id: string }; Querystring: { path?: string; download?: string; chat?: string } }>('/api/agents/:id/file', async (req, reply) => {
-  const dir = dirFor(req.params.id, req.query.chat);
+  // Gli allegati si caricano nel repo del progetto (uploadsDir), non nel worktree della chat: lì si cercano sempre.
+  const upload = req.query.path?.startsWith('.ciccio/uploads/');
+  const dir = upload ? store.agent(req.params.id)?.path ?? null : dirFor(req.params.id, req.query.chat);
   if (!dir) return reply.code(404).send({ error: 'agente sconosciuto' });
   const abs = req.query.path ? viewablePath(dir, req.query.path) : null;
   if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) return reply.code(404).send({ error: 'file non trovato' });

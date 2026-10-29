@@ -28,9 +28,10 @@ jobs:
         run: pnpm typecheck
       - name: Compilazione
         run: pnpm build
-      - name: Prove del companion (file, comandi, migrazioni, trasferimenti)
+      - name: Prove del companion (file, comandi, migrazioni, trasferimenti, ponti SSH)
         run: |
           pnpm exec tsx companion/test/file.ts
           pnpm exec tsx companion/test/comandi.ts
           pnpm exec tsx companion/test/migrazioni.ts
           pnpm exec tsx companion/test/transfer.ts
+          pnpm exec tsx companion/test/ponte.ts

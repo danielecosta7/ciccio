@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Wizard, type WizardStep } from './Wizard';
 import { PixelMark } from './ui';
-import { ownerNameError, rootStep, sshHostError, type GithubLoginState, type SetupItem, type SetupReport, type SetupState } from '../../shared/setup';
+import { internalSshHost, ownerNameError, privateSshHostCommand, rootStep, sshHostError, type GithubLoginState, type SetupItem, type SetupReport, type SetupState } from '../../shared/setup';
+import { parseBridgeTarget, type BridgeProposal } from '../../shared/companion';
+import type { CompanionView } from '../../shared/types';
 
 // Configurazione guidata: cosa manca sul server e come sistemarlo, un passo alla volta.
 // Prima sezione delle Impostazioni e pagina /configurazione, aperta da sola al primo accesso se manca qualcosa.
@@ -192,6 +194,9 @@ export function SshHostsEditor({ onChange }: { onChange?: () => void }) {
   const [error, setError] = useState('');
   useEffect(() => { void json<{ hosts: string[] }>('/api/setup/ssh-hosts').then((r) => setHosts(r.hosts)).catch(() => setHosts([])); }, []);
   const problem = host.trim() ? sshHostError(host) : null;
+  // Indirizzo interno: niente errore rosso, si propone il ponte attraverso un PC (e la strada di root).
+  const internal = !!host.trim() && internalSshHost(host);
+  const [viaPc, setViaPc] = useState(false);
   const act = async (action: 'add' | 'remove', h: string) => {
     if (action === 'remove' && !confirm(`Togliere ${h}? Gli agenti non potranno più collegarsi in SSH a quel server.`)) return;
     setBusy(h); setError('');
@@ -222,9 +227,109 @@ export function SshHostsEditor({ onChange }: { onChange?: () => void }) {
           className={`${input} font-mono text-[12.5px]`} />
         <button type="submit" disabled={!host.trim() || !!problem || busy != null} className={primary}>{busy === host.trim() ? 'Aggiungo…' : 'Aggiungi server'}</button>
       </form>
-      {problem && <p className="m-0 text-[12.5px] text-block">{problem}</p>}
+      {problem && !internal && <p className="m-0 text-[12.5px] text-block">{problem}</p>}
       {error && <p className="cc-wrap m-0 text-[12.5px] text-block">{error}</p>}
+      {!problem && host.trim() && !viaPc && (
+        <button type="button" onClick={() => setViaPc(true)} className="cc-press self-start text-[12.5px] text-muted underline underline-offset-2 hover:text-text">
+          È nella rete di un tuo PC (es. in ufficio)? Collegati attraverso il PC
+        </button>
+      )}
+      <SshBridges host={internal || viaPc ? host : ''} internal={internal} />
       <p className="m-0 text-[12.5px] leading-relaxed text-muted">Aggiungerne uno apre il firewall del server verso quell'host e quella porta (22 se non la scrivi). Lo fa l'helper ciccio-ssh-allow, che rifà da sé tutti i controlli.</p>
+    </div>
+  );
+}
+
+const PROPOSAL: Record<BridgeProposal, { tone: string; text: (pc: string, t: string) => string }> = {
+  consentito: { tone: 'text-done', text: (pc, t) => `Consentito sul PC «${pc}»: gli agenti raggiungono ${t} passando da lì, con ssh come sempre.` },
+  già: { tone: 'text-done', text: (pc, t) => `${t} era già consentito sul PC «${pc}».` },
+  rifiutato: { tone: 'text-block', text: (pc) => `Rifiutato sul PC «${pc}». Dopo un «No» il PC non ripropone la stessa richiesta per 10 minuti.` },
+  nessuna_risposta: { tone: 'text-wait', text: (pc) => `Nessuna risposta sul PC «${pc}» entro 2 minuti.` },
+};
+
+/**
+ * Ponti SSH attraverso i PC con il companion: i server della rete di un PC (es. l'ufficio), che il server non vede.
+ * Ciccio propone, il PC chiede nella sua finestra e solo lì si consente; «Togli» lo toglie dalla config del PC.
+ * `host`: la destinazione da proporre (vuota: solo l'elenco dei ponti già consentiti).
+ */
+function SshBridges({ host, internal }: { host: string; internal: boolean }) {
+  const [pcs, setPcs] = useState<CompanionView[] | null>(null);
+  const [pc, setPc] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<{ tone: string; text: string } | null>(null);
+  const [error, setError] = useState('');
+  const load = useCallback(() => json<CompanionView[]>('/api/companions').then(setPcs).catch(() => setPcs([])), []);
+  useEffect(() => { void load(); }, [load]);
+  const online = (pcs ?? []).filter((c) => c.online);
+  const chosen = online.find((c) => c.id === pc) ?? online[0];
+  const target = host.trim() ? parseBridgeTarget(host) : null;
+  useEffect(() => { setResult(null); setError(''); }, [host]);
+  const propose = async () => {
+    if (!chosen || !target) return;
+    setBusy('propose'); setError(''); setResult(null);
+    try {
+      const r = await json<{ esito: BridgeProposal; pc: string; target: string }>(`/api/companions/${encodeURIComponent(chosen.id)}/ssh-bridges`, { action: 'propose', host: target.key });
+      setResult({ tone: PROPOSAL[r.esito].tone, text: PROPOSAL[r.esito].text(r.pc, r.target) });
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
+  };
+  const remove = async (c: CompanionView, t: string) => {
+    if (!confirm(`Togliere il ponte verso ${t} dal PC «${c.name}»? Gli agenti non potranno più collegarsi lì passando da quel PC.`)) return;
+    setBusy(`${c.id} ${t}`); setError('');
+    try { await json(`/api/companions/${encodeURIComponent(c.id)}/ssh-bridges`, { action: 'remove', host: t }); await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
+  };
+  const withBridges = online.filter((c) => c.sshBridges?.length);
+  if (!target && !withBridges.length) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-[10px] border border-line p-3">
+      {target && (
+        <>
+          <div className="text-[13.5px] font-semibold">Attraverso un PC</div>
+          <p className="m-0 text-[13px] leading-relaxed text-soft">
+            {internal ? `${target.host} è un indirizzo interno: il server non ci arriva da solo. ` : ''}
+            Un tuo PC acceso con il companion, nella stessa rete di {target.key}, può fare da ponte: compare una finestra sul PC e, se consenti, gli agenti arrivano lì con ssh. Solo quella porta, sempre con le chiavi SSH e i consensi di 1Password.
+          </p>
+          {pcs == null ? <div className="text-[13px] text-muted">Carico i PC…</div>
+            : !online.length ? <p className="m-0 text-[12.5px] text-wait">Nessun PC acceso con il companion adesso: accendi quello nella rete di {target.host} e riprova.</p>
+              : (
+                <div className="flex flex-wrap gap-2">
+                  <select value={chosen?.id ?? ''} onChange={(e) => setPc(e.target.value)} aria-label="PC che fa da ponte" className={`${input} max-w-[16rem]`}>
+                    {online.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <button type="button" disabled={busy != null} onClick={() => void propose()} className={primary}>
+                    {busy === 'propose' ? 'Aspetto la risposta sul PC…' : 'Chiedi al PC'}
+                  </button>
+                </div>
+              )}
+          {result && <p className={`cc-wrap m-0 text-[12.5px] ${result.tone}`}>{result.text}</p>}
+          {internal && (
+            <>
+              <p className="m-0 text-[12.5px] leading-relaxed text-muted">In alternativa, se il server raggiunge da sé quella rete (per un ufficio serve un subnet router di Tailscale), lo aggiunge root sul server, all'elenco qui sopra:</p>
+              <CopyLine text={privateSshHostCommand(host)} />
+            </>
+          )}
+        </>
+      )}
+      {withBridges.length > 0 && (
+        <>
+          <div className="text-[13px] font-semibold">Ponti attraverso i PC</div>
+          {withBridges.map((c) => (
+            <div key={c.id} className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[12.5px] text-muted">{c.name}:</span>
+              {c.sshBridges!.map((t) => (
+                <span key={t} className="flex items-center gap-1 rounded-[6px] border border-line bg-panel-hi py-0.5 pr-0.5 pl-2 font-mono text-[12px]">
+                  {t}
+                  <button type="button" disabled={busy === `${c.id} ${t}`} onClick={() => void remove(c, t)} aria-label={`Togli ${t} dal PC ${c.name}`} title="Togli"
+                    className="cc-press flex h-6 w-6 items-center justify-center rounded-[4px] text-muted hover:text-block disabled:opacity-40">×</button>
+                </span>
+              ))}
+            </div>
+          ))}
+          <p className="m-0 text-[12px] leading-relaxed text-muted">Solo i PC accesi adesso. Sul PC i ponti stanno in ssh.ponti nella config del companion: si tolgono anche da lì.</p>
+        </>
+      )}
+      {error && <p className="cc-wrap m-0 text-[12.5px] text-block">{error}</p>}
     </div>
   );
 }

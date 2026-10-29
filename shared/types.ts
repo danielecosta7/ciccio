@@ -189,6 +189,8 @@ export interface CompanionView {
   notifications: boolean;
   /** 1Password su quel PC (agent SSH, CLI op); null se il PC è spento. */
   onePassword: { sshAgent: boolean; cli: boolean } | null;
+  /** Ponti SSH consentiti sul PC ("host:porta": Ciccio ci arriva passando da lì); null se il PC è spento. */
+  sshBridges: string[] | null;
   servers: CompanionServer[];
 }
 

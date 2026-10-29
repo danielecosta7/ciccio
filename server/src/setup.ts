@@ -21,14 +21,14 @@ const HELPERS = ['ciccio-egress-allow', 'ciccio-apt-install', 'ciccio-ssh-allow'
 const SSH_HELPER = '/usr/local/sbin/ciccio-ssh-allow';
 const OWNER_KEY = 'owner_name';
 
-interface Run { ok: boolean; code: number | null; stdout: string; stderr: string; missing: boolean }
+interface Run { ok: boolean; code: number | null; stdout: string; stderr: string; missing: boolean; timedOut: boolean }
 
 /** Lancia un programma con un tempo massimo; non lancia mai eccezioni. */
 function run(cmd: string, args: string[], timeout = 4000, env: NodeJS.ProcessEnv = {}): Promise<Run> {
   return new Promise((resolve) => {
     execFile(cmd, args, { timeout, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', NO_COLOR: '1', ...env } }, (err, stdout, stderr) => {
       const e = err as (NodeJS.ErrnoException & { code?: string | number }) | null;
-      resolve({ ok: !e, code: e ? (typeof e.code === 'number' ? e.code : null) : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), missing: e?.code === 'ENOENT' });
+      resolve({ ok: !e, code: e ? (typeof e.code === 'number' ? e.code : null) : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), missing: e?.code === 'ENOENT', timedOut: !!(e as { killed?: boolean } | null)?.killed });
     });
   });
 }
@@ -89,6 +89,12 @@ function startGithubLogin(): GithubLoginState {
   ghLogin = { state: 'waiting', proc, url: 'https://github.com/login/device' };
   let out = '';
   const timer = setTimeout(() => { proc.kill('SIGTERM'); if (ghLogin.proc === proc) ghLogin = { state: 'error', error: 'Tempo scaduto: il codice vale 15 minuti. Riprova.' }; }, 15 * 60_000);
+  // Il codice arriva da GitHub in pochi secondi: se dopo 45 non c'è, GitHub non risponde dal server.
+  const noCode = setTimeout(() => {
+    if (ghLogin.proc !== proc || ghLogin.code) return;
+    proc.kill('SIGTERM');
+    ghLogin = { state: 'error', error: 'GitHub non ha dato il codice entro 45 secondi: dal server non risponde. Riprova tra poco.' };
+  }, 45_000);
   const onData = (b: Buffer) => {
     out = (out + b.toString()).slice(-8000);
     const code = /one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i.exec(out)?.[1];
@@ -100,9 +106,10 @@ function startGithubLogin(): GithubLoginState {
   };
   proc.stdout?.on('data', onData);
   proc.stderr?.on('data', onData);
-  proc.on('error', () => { clearTimeout(timer); if (ghLogin.proc === proc) ghLogin = { state: 'error', error: 'gh non è installato sul server.' }; });
+  proc.on('error', () => { clearTimeout(timer); clearTimeout(noCode); if (ghLogin.proc === proc) ghLogin = { state: 'error', error: 'gh non è installato sul server.' }; });
   proc.on('close', (code) => {
     clearTimeout(timer);
+    clearTimeout(noCode);
     if (ghLogin.proc !== proc) return;
     if (code !== 0) {
       const last = out.split('\n').map((l) => l.trim()).filter((l) => l && !/one-time code|Press Enter|Open this URL/i.test(l)).pop();
@@ -111,7 +118,7 @@ function startGithubLogin(): GithubLoginState {
     }
     void run('gh', ['auth', 'setup-git'], 10_000).then(async (r) => {
       const login = await githubLogin();
-      ghLogin = r.ok ? { state: 'done', login: login ?? undefined } : { state: 'error', error: `Accesso fatto, ma gh auth setup-git non è riuscito: ${firstLine(r.stderr) || 'errore'}` };
+      ghLogin = r.ok ? { state: 'done', login: login && login !== 'lento' ? login : undefined } : { state: 'error', error: `Accesso fatto, ma gh auth setup-git non è riuscito: ${firstLine(r.stderr) || 'errore'}` };
       cached = null;
     });
   });
@@ -123,9 +130,13 @@ function view(s: typeof ghLogin): GithubLoginState {
   return rest;
 }
 
-/** Account GitHub di gh, se ha fatto l'accesso (senza mai stampare il token). */
-async function githubLogin(): Promise<string | null> {
-  const r = await run('gh', ['auth', 'status', '--hostname', 'github.com'], 6000);
+/**
+ * Account GitHub di gh, se ha fatto l'accesso (senza mai stampare il token); 'lento' se GitHub non ha risposto in
+ * tempo (per esempio il proxy in uscita pieno quando lavorano molti agenti): non vuol dire che l'accesso manchi.
+ */
+async function githubLogin(): Promise<string | null | 'lento'> {
+  const r = await run('gh', ['auth', 'status', '--hostname', 'github.com'], 20_000);
+  if (r.timedOut) return 'lento';
   if (!r.ok) return null;
   return /Logged in to github\.com (?:account|as) (\S+)/.exec(`${r.stdout}\n${r.stderr}`)?.[1] ?? '';
 }
@@ -137,7 +148,7 @@ async function gitIdentity() {
 
 /** Nome ed email proposti per git, dall'account GitHub (email privata: quella noreply di GitHub). */
 async function gitSuggestion(): Promise<{ name: string; email: string } | null> {
-  const r = await run('gh', ['api', 'user'], 8000);
+  const r = await run('gh', ['api', 'user'], 20_000);
   if (!r.ok) return null;
   try {
     const u = JSON.parse(r.stdout) as { id?: number; login?: string; name?: string | null; email?: string | null };
@@ -227,6 +238,7 @@ async function githubItems(): Promise<SetupItem[]> {
   const [login, id] = await Promise.all([githubLogin(), gitIdentity()]);
   const ghMissing = login == null && (await run('gh', ['--version'], 2000)).missing;
   const ghItem: SetupItem = ghMissing ? { ...gh, rimedio: root('pacchetti'), stato: 'manca', dettaglio: 'gh (GitHub CLI) non è installato.' }
+    : login === 'lento' ? { ...gh, stato: 'avviso', dettaglio: 'GitHub non ha risposto dal server entro 20 secondi: riprova tra poco. Se capita spesso, il proxy in uscita è pieno.' }
     : login == null ? { ...gh, stato: 'manca', dettaglio: 'gh non ha fatto l\'accesso: servono i repo per creare e importare progetti.' }
       : { ...gh, stato: 'ok', dettaglio: login ? `Accesso come ${login}.` : 'Accesso fatto.' };
   const gitItem: SetupItem = id.name && id.email ? { ...git, stato: 'ok', dettaglio: `${id.name} <${id.email}>` }

@@ -68,6 +68,9 @@ jobs:
       - name: Prova di scarica_da_ciccio e carica_su_ciccio (con il server di Ciccio)
         shell: bash
         run: pnpm exec tsx companion/test/transfer.ts
+      - name: Prova dei ponti SSH (con il server di Ciccio, named pipe al posto del socket)
+        shell: bash
+        run: pnpm exec tsx companion/test/ponte.ts
       - name: Compila l'exe
         shell: bash
         run: bash companion/build.sh windows-x64

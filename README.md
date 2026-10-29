@@ -145,6 +145,7 @@ Due programmi facoltativi per Mac (Apple Silicon) e Windows, che trovi nelle [re
 
 - **App desktop.** Ciccio in una finestra sua, con le notifiche del sistema e Consenti/Rifiuta direttamente dalla notifica.
 - **Companion.** Gli agenti usano i programmi del tuo PC acceso (Chrome, file, comandi, 1Password), sempre con una conferma sul PC.
+- **Ponti SSH.** I server della rete del tuo PC (per esempio in ufficio), che il server di Ciccio non vede, si raggiungono in SSH passando dal PC: solo gli indirizzi che consenti lì.
 
 Si collegano a Ciccio con un codice e si aggiornano da soli, solo con release firmate.
 

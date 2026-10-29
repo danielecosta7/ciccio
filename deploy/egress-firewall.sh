@@ -102,7 +102,9 @@ Group tinyproxy
 Port 8888
 Listen 127.0.0.1
 Timeout 900
-MaxClients 100
+# Ogni agente al lavoro tiene aperte più connessioni verso Anthropic: con 100 il proxy si riempiva
+# e rifiutava le nuove (gh, npm…) quando lavoravano molti agenti insieme.
+MaxClients 500
 Allow 127.0.0.1
 ConnectPort 443
 ConnectPort 80

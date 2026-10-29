@@ -197,8 +197,11 @@ export function readOnlyInDir(dir: string): string[] {
   return ['.git', '.claude', '.mcp.json', '.gitmodules', P.join('.ciccio', 'worktrees')].map((p) => P.join(dir, p));
 }
 
-/** Sandbox dei comandi Bash di un agente: legge e scrive la cartella della chat, il resto dei progetti non lo vede. */
-export function agentSandbox(scope: Scope, sshSock: string): SandboxSettings {
+/**
+ * Sandbox dei comandi Bash di un agente: legge e scrive la cartella della chat, il resto dei progetti non lo vede.
+ * `sshSock` e `bridgeSock`: i socket della chat per l'agent SSH e per il ponte SSH (sshAgent.ts, sshBridge.ts).
+ */
+export function agentSandbox(scope: Scope, sshSock: string, bridgeSock?: string): SandboxSettings {
   const own = projectDirs(scope.project);
   return {
     enabled: true,
@@ -209,7 +212,7 @@ export function agentSandbox(scope: Scope, sshSock: string): SandboxSettings {
     allowUnsandboxedCommands: false,
     filesystem: {
       denyRead: [...forbiddenRoots(), ...secretRoots(), ...SYSTEM_SOCKETS],
-      allowRead: [scope.dir, own.root, sshSock, ...SANDBOX_READ_BACK],
+      allowRead: [scope.dir, own.root, sshSock, ...(bridgeSock ? [bridgeSock] : []), ...SANDBOX_READ_BACK],
       // Oltre alla cartella della chat (e alla cartella temporanea della sessione): cache e host SSH del progetto.
       allowWrite: [own.cache, own.ssh],
       // Dentro la cartella della chat: git (gli oggetti e i branch sì, hook e config no: li tiene già Claude Code),
@@ -218,8 +221,8 @@ export function agentSandbox(scope: Scope, sshSock: string): SandboxSettings {
     },
     // I domini li filtra già il firewall in uscita (tinyproxy); gli indirizzi interni li nega confineNetwork.
     // Socket Unix: su Linux allowUnixSockets non basta (il filtro seccomp li blocca tutti), quindi tutti aperti e
-    // quelli pericolosi nascosti sopra; degli agent SSH di Ciccio si vede solo quello della chat (~/.ciccio è
-    // nascosto, il socket della chat riaperto).
+    // quelli pericolosi nascosti sopra; degli agent e dei ponti SSH di Ciccio si vedono solo quelli della chat
+    // (~/.ciccio è nascosto, i socket della chat riaperti).
     network: { allowAllUnixSockets: true },
   };
 }

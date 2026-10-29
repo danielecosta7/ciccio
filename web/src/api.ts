@@ -322,7 +322,14 @@ export function useCiccio() {
   }, []);
 
   const decide = useCallback(async (id: string, allow: boolean, always = false) => {
-    await api.decide(id, allow, always);
+    try {
+      await api.decide(id, allow, always);
+    } catch (e) {
+      // Già chiusa altrove (altra scheda, giro finito): la card sparisce, niente errore muto che la lascia lì.
+      if (!/non più in attesa/.test(e instanceof Error ? e.message : '')) throw e;
+      setApprovals((s) => ({ ...s, [id]: { ...s[id], status: 'denied' } }));
+      return;
+    }
     setApprovals((s) => ({ ...s, [id]: { ...s[id], status: allow ? 'allowed' : 'denied' } }));
   }, []);
 

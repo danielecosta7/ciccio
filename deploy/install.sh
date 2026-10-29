@@ -213,6 +213,8 @@ touch "$HOME/.ssh/config" && chmod 600 "$HOME/.ssh/config"
 # Dentro la sandbox degli agenti (SANDBOX_RUNTIME) ssh passa dal proxy della sandbox: vedi deploy/ssh-proxy.sh.
 mkdir -p "$HOME/.local/bin"
 install -m 755 deploy/ssh-proxy.sh "$HOME/.local/bin/ciccio-ssh-proxy"
+# Ponte SSH attraverso un PC con il companion (server della rete dell'ufficio): lo usa ciccio-ssh-proxy.
+install -m 755 deploy/ssh-bridge.cjs "$HOME/.local/bin/ciccio-ssh-bridge.cjs"
 sed -i '/^# BEGIN ciccio-ssh$/,/^# END ciccio-ssh$/d' "$HOME/.ssh/config"
 cat >> "$HOME/.ssh/config" <<EOF
 # BEGIN ciccio-ssh

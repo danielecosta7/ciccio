@@ -54,7 +54,27 @@ export function sshHostError(raw: string): string | null {
   if (!m) return 'Solo host o host:porta: lettere, cifre, punti e trattini, senza utente né spazi.';
   if (m[1].includes('..') || m[1].endsWith('.') || m[1].endsWith('-')) return 'Nome host non valido.';
   if (m[2] && (Number(m[2]) < 1 || Number(m[2]) > 65535)) return 'Porta tra 1 e 65535.';
+  // Indirizzi interni: l'helper li rifiuta sempre, li aggiunge solo root in persona (vedi ciccio-ssh-allow.sh).
+  if (internalIPv4(m[1])) {
+    return `${m[1]} è un indirizzo interno (rete privata o tailnet): da qui non si aggiunge. Si raggiunge attraverso un tuo PC acceso in quella rete (ponte SSH con il companion), oppure il server deve arrivarci da sé (per una rete dell'ufficio serve un subnet router di Tailscale) e lo aggiunge root: ${privateSshHostCommand(v)}`;
+  }
   return null;
+}
+
+/** Comando di root per aggiungere un server interno all'elenco SSH (il server deve arrivarci da sé). */
+export const privateSshHostCommand = (v: string) => `sudo bash /usr/local/lib/ciccio/ssh-hosts.sh add ${v.trim()} --privato`;
+
+/** IPv4 di loopback, reti private, link-local, CGNAT e tailnet (100.64.0.0/10), anche con :porta. */
+export function internalSshHost(raw: string): boolean {
+  return internalIPv4(raw.trim().replace(/:\d{1,5}$/, ''));
+}
+
+/** IPv4 di loopback, reti private, link-local, CGNAT e tailnet (100.64.0.0/10). */
+function internalIPv4(host: string): boolean {
+  const p = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)?.slice(1).map(Number);
+  if (!p || p.some((n) => n > 255)) return false;
+  const [a, b] = p;
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
 }
 
 /** Nome di chi usa Ciccio: lettere, spazi, apostrofi, punti e trattini, al massimo 40 caratteri. */

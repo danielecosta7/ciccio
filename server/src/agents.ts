@@ -11,8 +11,9 @@ import { ignoreCiccioDir } from './files.js';
 import { onSubscription, recordUsage } from './usage.js';
 import { noteTurn, turnOrigin, type TurnOrigin } from './consumi.js';
 import { settings } from './settings.js';
-import { onePasswordAvailable, onePasswordChosen, pcMcpServers, pcPrompt, pcToolHints, releasePcServers } from './companion.js';
+import { bridgesPrompt, onePasswordAvailable, onePasswordChosen, pcMcpServers, pcPrompt, pcToolHints, releasePcServers } from './companion.js';
 import { openChatSshAgent } from './sshAgent.js';
+import { openChatSshBridge } from './sshBridge.js';
 import { chatDir, createChatWorktree, removeChatWorktree } from './worktrees.js';
 import { ORCHESTRATOR_SERVER, TO_CICCIO_TOOL, orchestratorServer } from './orchestrator.js';
 import { CREDENTIAL_TOOL, CREDENTIALS_SERVER, credentialProblem, credentialsServer } from './credentials.js';
@@ -624,9 +625,11 @@ function waitForOwner(thread: Thread, state: Running, tool: string, summary: str
   publish(thread.agentId);
   return new Promise<PermissionResult>((resolve) => {
     state.asking.set(approval.id, toolUseId ?? null);
-    state.pending.set(approval.id, (r) => { state.asking.delete(approval.id); resolve(r); });
+    lingering.set(approval.id, state);
+    state.pending.set(approval.id, (r) => { state.asking.delete(approval.id); lingering.delete(approval.id); resolve(r); });
     signal.addEventListener('abort', () => {
       state.asking.delete(approval.id);
+      lingering.delete(approval.id);
       if (state.pending.delete(approval.id)) {
         store.setApproval(approval.id, 'denied');
         // La card (o la finestra della domanda) sparisce anche dalle pagine aperte.
@@ -635,6 +638,28 @@ function waitForOwner(thread: Thread, state: Running, tool: string, summary: str
       }
     });
   });
+}
+
+/**
+ * Richieste in attesa per id, anche quando il giro è già finito e non sta più in `running`: l'agente SSH e i processi
+ * lasciati in coda possono chiedere le chiavi dopo la fine del giro, e la risposta deve comunque arrivargli.
+ */
+const lingering = new Map<string, Running>();
+
+/** Chi aspetta questa richiesta: un giro in corso, oppure uno finito che ha ancora un processo in coda. */
+function waiting(id: string): [string, Running] | null {
+  for (const [chatId, state] of running) if (state.pending.has(id)) return [chatId, state];
+  const state = lingering.get(id);
+  return state ? [state.live.chatId, state] : null;
+}
+
+/** Permesso rimasto «in attesa» nel database senza nessuno che lo aspetti: si chiude, così la card non resta lì morta. */
+function closeOrphan(id: string) {
+  const a = store.pendingApprovals().find((x) => x.id === id);
+  if (!a || findParked(id)) return;
+  store.setApproval(id, 'denied');
+  bus.emit({ type: 'approval', approval: { ...a, status: 'denied' } });
+  if (a.chatId !== CICCIO_THREAD) publish(a.agentId);
 }
 
 /** Chiede un permesso all'utente nella chat della sessione e aspetta la risposta. */
@@ -666,9 +691,10 @@ function cleanAnswers(approval: Approval, answers: Record<string, string>): Reco
 }
 
 export function answerQuestion(id: string, answers: Record<string, string>): boolean {
-  for (const [chatId, state] of running) {
-    const resolve = state.pending.get(id);
-    if (!resolve) continue;
+  const held = waiting(id);
+  if (held) {
+    const [chatId, state] = held;
+    const resolve = state.pending.get(id)!;
     const approval = store.pendingApprovals(chatId).find((a) => a.id === id);
     if (!approval || approval.tool !== ASK_TOOL) return false;
     const clean = cleanAnswers(approval, answers);
@@ -772,13 +798,15 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
     return sshAsking;
   };
   const ssh = openChatSshAgent(chatId, approveSsh, (t) => say(thread, 'tool', t), state.abort.signal);
+  // Ponti SSH: i server della rete di un PC (es. l'ufficio) attraverso il companion, se il PC li consente.
+  const bridge = openChatSshBridge(chatId, (t) => say(thread, 'tool', t), state.abort.signal);
   // Server SSH dell'elenco di Ciccio senza tinyproxy: dalla sandbox ssh passa dal suo proxy e poi va diretto.
   const noProxy = noProxyWithSshHosts(claudeEnv.NO_PROXY ?? claudeEnv.no_proxy);
   // Connettori di claude.ai: accesi per il progetto e solo con il login dell'abbonamento.
   const connectors = !!row.connectors && onSubscription();
   // Cache dei pacchetti e known_hosts del progetto (projectEnv): i comandi della sandbox scrivono solo lì.
   // sandboxGitEnv: git nella sandbox ignora i punti di montaggio di bubblewrap (.bashrc, .vscode…).
-  const agentEnv = { ...claudeEnv, ...agentDisplay(), ...projectEnv(row.id), ...sandboxGitEnv(row.id), ENABLE_CLAUDEAI_MCP_SERVERS: connectors ? 'true' : 'false', SSH_AUTH_SOCK: ssh.path, NO_PROXY: noProxy, no_proxy: noProxy };
+  const agentEnv = { ...claudeEnv, ...agentDisplay(), ...projectEnv(row.id), ...sandboxGitEnv(row.id), ENABLE_CLAUDEAI_MCP_SERVERS: connectors ? 'true' : 'false', SSH_AUTH_SOCK: ssh.path, CICCIO_SSH_BRIDGE: bridge.path, NO_PROXY: noProxy, no_proxy: noProxy };
   const credServer = credentialsServer(scope, state.abort.signal);
   const orchServer = orchestratorServer({ agentId: row.id, chatId, chatTitle: chat.title });
   const sysServer = systemServer({
@@ -806,6 +834,7 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
   if (connectors) rules.push(`- Hai i connettori di ${OWNER} (posta, calendario, Notion e altri) come strumenti mcp__: usali quando servono al lavoro.`);
   rules.push(`- PC di ${OWNER} e chiavi SSH vanno e vengono: la riga «[Adesso: …]» all\'inizio di un messaggio dice cosa c\'è in quel momento e vale più di quello che sapevi prima.`);
   rules.push(`- SSH: ssh, scp, rsync e git usano le chiavi SSH di ${OWNER} in 1Password, che arrivano dal suo Mac o PC Windows solo quando è acceso con il companion. La prima firma la approva ${OWNER} in Ciccio e vale 15 minuti; poi conferma sul PC (una finestra con utente e server, poi Touch ID o Windows Hello). Il PC firma solo accessi SSH: firme di commit o di altri dati con queste chiavi non passano. Se la firma fallisce («agent refused operation», «signing failed»), ${OWNER} non ha ancora approvato: diglielo in chat e rilancia il comando dopo il suo ok, non insistere in background. Raggiungi solo i server nell'elenco SSH di Ciccio: se un host non risponde, chiedi a ${OWNER} di aggiungerlo. Non creare né copiare chiavi private.`);
+  rules.push(`- Server SSH interni (192.168.x.x, 10.x.x.x, nomi della rete dell'ufficio): li raggiungi solo se ${OWNER} ha impostato un ponte attraverso un suo PC in Configurazione › Server SSH; ssh lo usa da solo. Se non c'è, chiedilo a ${OWNER}, non cercare altre strade.`);
   rules.push(`- Se ti manca un programma di sistema (es. openscad, imagemagick), chiedilo con lo strumento installa_programma: solo pacchetti ufficiali di Ubuntu, lo approva ${OWNER} ogni volta. Non provare sudo o apt. Una volta installato, i comandi che lo usano seguono il livello di autorizzazione della chat come gli altri. Se il proxy blocca un sito che ti serve (403 o 502 dal proxy, «Proxying refused»), chiedi quel dominio con consenti_dominio.`);
   rules.push(`- Se ti serve uno strumento che non hai e che userai più volte (un programma o uno script del server con parametri fissi, o un server MCP), proponilo con proponi_comando o proponi_server_mcp (server ciccio_strumenti, li trovi con ToolSearch): ${OWNER} vede il comando esatto e, se lo consente, resta al progetto per tutte le chat. Per un lavoro da ripetere a orari fissi proponi una routine con crea_routine.`);
   rules.push(`- Password, chiavi API e altri segreti: non chiederli mai a ${OWNER} in chat e non scriverli nei file. Usa lo strumento usa_credenziale con il riferimento di 1Password (op://vault/elemento/campo); se non lo conosci, chiedi a ${OWNER} il riferimento, non il valore.`);
@@ -818,6 +847,7 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
     sshPc ? `- Chiavi SSH di 1Password disponibili (PC "${sshPc}").`
       : onePasswordChosen() ? `- Chiavi SSH di 1Password non disponibili: ${OWNER} le ha impostate sul PC "${onePasswordChosen()}", che adesso è spento o ha il companion chiuso. Se ti serve SSH, diglielo.`
       : `- Chiavi SSH di 1Password non disponibili (nessun PC acceso con il companion): se ti serve SSH, dillo a ${OWNER}.`,
+    bridgesPrompt(),
   ].filter(Boolean);
   // I comandi (/compact) vanno così come sono, anche se scritti a metà messaggio (portati in testa).
   const sent = hoistCommand(row.id, prompt);
@@ -830,6 +860,7 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
     finished = true;
     releasePcServers(pcServers);
     ssh.close();
+    bridge.close();
     void credServer.instance.close().catch(() => undefined);
     void sysServer.instance.close().catch(() => undefined);
     void toolsServer.instance.close().catch(() => undefined);
@@ -859,7 +890,7 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
         canUseTool,
         // Comandi Bash chiusi nel repo del progetto (bubblewrap): vedi confine.ts.
         // Le credenziali di Anthropic restano al processo di Claude Code: i comandi non le vedono (config.ts).
-        sandbox: withoutClaudeCredentials(agentSandbox(scope, ssh.path)),
+        sandbox: withoutClaudeCredentials(agentSandbox(scope, ssh.path, bridge.path)),
         // 'project' serve per CLAUDE.md (e skill e comandi del repo); hook, permessi, server MCP e agenti dei file
         // li spegne sessionLockdown, così un .claude/settings.json o un .mcp.json del repo non decide niente.
         settingSources: ['user', 'project', 'local'],
@@ -1063,9 +1094,10 @@ function verdictFor(approval: Approval | undefined, allow: boolean, always: bool
 }
 
 export function decideApproval(id: string, allow: boolean, always = false): boolean {
-  for (const [chatId, state] of running) {
-    const resolve = state.pending.get(id);
-    if (!resolve) continue;
+  const held = waiting(id);
+  if (held) {
+    const [chatId, state] = held;
+    const resolve = state.pending.get(id)!;
     const approval = store.pendingApprovals(chatId).find((a) => a.id === id);
     // Una domanda si chiude solo con le risposte: «Rifiuta» la salta, «Consenti» non vale.
     if (approval?.tool === ASK_TOOL) return allow ? false : answerQuestion(id, {});
@@ -1084,7 +1116,7 @@ export function decideApproval(id: string, allow: boolean, always = false): bool
   }
   // Card riproposta dopo un riavvio: il giro riprende quando l'utente ha risposto a tutte quelle della chat.
   const found = findParked(id);
-  if (!found) return false;
+  if (!found) { closeOrphan(id); return false; }
   const [p, approval] = found;
   if (approval.tool === ASK_TOOL) return allow ? false : answerQuestion(id, {});
   const verdict = verdictFor(approval, allow, always);

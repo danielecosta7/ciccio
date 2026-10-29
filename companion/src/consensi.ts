@@ -211,7 +211,7 @@ export function sshTarget(msg: Buffer, bindMsg: Buffer | null, knownHosts?: stri
 interface Allowed { segreti: string[]; ssh: string[] }
 
 /** Testo scritto da altri (motivo dell'agente) nella finestra: una riga, senza caratteri che ingannano. */
-const clean = (s: string, max: number) => s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]+/g, ' ').trim().slice(0, max);
+export const clean = (s: string, max: number) => s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]+/g, ' ').trim().slice(0, max);
 
 export class OnePasswordGuard {
   private queue: Promise<unknown> = Promise.resolve();

@@ -10,6 +10,80 @@ let agentLabel = "it.costa.ciccio-companion.app"
 let oldCliLabel = "it.costa.ciccio-companion"
 let bundleID = "it.costa.ciccio-companion.app"
 
+/// Riga nel registro condiviso con il companion (~/Library/Logs/ciccio-companion.log, in coda con O_APPEND).
+/// Funzione libera: la usano anche il gestore delle eccezioni e la sorveglianza del thread principale.
+func appLog(_ line: String) {
+    let f = DateFormatter()
+    f.dateFormat = "HH:mm:ss"
+    let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/ciccio-companion.log").path
+    guard let data = "\(f.string(from: Date())) \(line)\n".data(using: .utf8) else { return }
+    let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+    guard fd >= 0 else { return }
+    let h = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+    h.write(data)
+}
+
+/// Chi ha mandato l'ultimo SIGTERM (si_pid), scritto dal gestore del segnale e letto quando si chiude.
+var lastTermSender: pid_t = 0
+
+func processName(_ pid: pid_t) -> String {
+    var buf = [CChar](repeating: 0, count: 256)
+    proc_name(pid, &buf, UInt32(buf.count))
+    let name = String(cString: buf)
+    return name.isEmpty ? "pid \(pid)" : "\(name) (pid \(pid))"
+}
+
+/// Sorveglianza del thread principale: se per più di 5 secondi non risponde, lo scrive nel registro e salva
+/// con /usr/bin/sample dove si è fermato (~/Library/Logs/ciccio-companion-blocco-*.txt), al massimo una volta ogni
+/// 10 minuti; quando si sblocca scrive dopo quanto. Gira su un thread suo: il principale bloccato non la ferma.
+final class MainThreadWatchdog {
+    private let lock = NSLock()
+    private var lastBeat = Date()
+    private var blockedSince: Date?
+    private var lastSample = Date.distantPast
+
+    func start() {
+        let t = Thread { [weak self] in
+            while let self {
+                DispatchQueue.main.async { self.beat() }
+                Thread.sleep(forTimeInterval: 1)
+                self.check()
+            }
+        }
+        t.name = "sorveglianza thread principale"
+        t.qualityOfService = .utility
+        t.start()
+    }
+
+    private func beat() {
+        lock.lock(); let was = blockedSince; blockedSince = nil; lastBeat = Date(); lock.unlock()
+        if let was { appLog("app: thread principale di nuovo libero dopo \(Int(Date().timeIntervalSince(was) + 5)) s") }
+    }
+
+    private func check() {
+        lock.lock()
+        let late = Date().timeIntervalSince(lastBeat)
+        let first = late > 5 && blockedSince == nil
+        if first { blockedSince = lastBeat }
+        let sample = first && Date().timeIntervalSince(lastSample) > 600
+        if sample { lastSample = Date() }
+        lock.unlock()
+        guard first else { return }
+        appLog("app: thread principale bloccato da \(Int(late)) s")
+        guard sample else { return }
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let out = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/ciccio-companion-blocco-\(f.string(from: Date())).txt").path
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
+        p.arguments = [String(getpid()), "3", "-mayDie", "-file", out]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        if (try? p.run()) != nil { appLog("app: dove si è fermato, in \(out)") }
+    }
+}
+
 /// Una notifica lasciata dal companion in ~/.ciccio-companion/notify (NotifyParams in shared/companion.ts).
 struct PendingNotification: Decodable { let id: String; let title: String; let body: String; let url: String }
 
@@ -43,6 +117,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     /** Chiusa da fuori (Impostazioni di Sistema, Monitoraggio Attività…): si riapre da sola. */
     private var relaunchAfterQuit = false
     private var restartDelay = 1.0
+    /// Perché l'app si sta chiudendo: si scrive nel registro alla chiusura («motivo sconosciuto» se manca).
+    private var quitReason: String?
+    private let watchdog = MainThreadWatchdog()
     private var timer: Timer?
     private let fm = FileManager.default
 
@@ -70,10 +147,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.delegate = self
         item.menu = menu
         removeOldCliAgent()
-        // Chiusa con un segnale (logout, kill): si esce bene, chiudendo anche il companion.
-        signal(SIGTERM, SIG_IGN)
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        appLog("app avviata (versione \(version), pid \(getpid()))")
+        // Acceso all'avvio, spento solo dalla chiusura normale: se è ancora acceso, la volta prima l'app è
+        // stata chiusa di colpo (a forza, o un crash senza rapporto).
+        if UserDefaults.standard.bool(forKey: "running") { appLog("app: la volta prima si è chiusa di colpo, senza la sua uscita normale") }
+        UserDefaults.standard.set(true, forKey: "running")
+        NSSetUncaughtExceptionHandler { e in
+            appLog("app: eccezione non gestita \(e.name.rawValue): \(e.reason ?? "")\n\(e.callStackSymbols.prefix(15).joined(separator: "\n"))")
+        }
+        watchdog.start()
+        // Chiusa con un segnale (logout, kill): si esce bene, chiudendo anche il companion. Il gestore C annota
+        // solo chi l'ha mandato; l'uscita la fa la sorgente di dispatch, sul thread principale.
+        var action = sigaction()
+        action.sa_flags = SA_SIGINFO
+        action.__sigaction_u.__sa_sigaction = { _, info, _ in if let info { lastTermSender = info.pointee.si_pid } }
+        sigaction(SIGTERM, &action, nil)
         let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        term.setEventHandler { NSApp.terminate(nil) }
+        term.setEventHandler { [weak self] in
+            let from = lastTermSender > 0 ? processName(lastTermSender) : "mittente sconosciuto"
+            self?.quitReason = self?.quitReason ?? "segnale SIGTERM da \(from)"
+            NSApp.terminate(nil)
+        }
         term.resume()
         termSignal = term
         // Alla prima apertura si accende da solo all'accesso: è un servizio, deve esserci sempre.
@@ -103,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             proc_name(pid, &buf, UInt32(buf.count))
             let name = String(cString: buf)
             appendLog("app chiusa da \(name.isEmpty ? "pid \(pid)" : name)")
+            quitReason = quitReason ?? "richiesta di uscita da \(processName(pid))"
             if name != "loginwindow" { relaunchAfterQuit = true }
         }
         return .terminateNow
@@ -123,6 +219,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        appLog("app chiusa: \(quitReason ?? "motivo sconosciuto")")
+        UserDefaults.standard.set(false, forKey: "running")
         if relaunchAfterQuit {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -340,7 +438,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(action("Strumenti esposti…", #selector(openConfig)))
         menu.addItem(action("Registro", #selector(openLog)))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Esci", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let quit = action("Esci", #selector(quitFromMenu))
+        quit.keyEquivalent = "q"
+        menu.addItem(quit)
     }
 
     private func info(_ s: String) -> NSMenuItem { let i = NSMenuItem(title: s, action: nil, keyEquivalent: ""); i.isEnabled = false; return i }
@@ -358,6 +458,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         else { alert("Ancora niente da mostrare", "La configurazione nasce quando colleghi il Mac a Ciccio.") }
     }
     @objc private func openLog() { NSWorkspace.shared.open(logFile) }
+
+    @objc private func quitFromMenu() {
+        quitReason = "«Esci» dal menu"
+        NSApp.terminate(nil)
+    }
 
     private func refreshIcon() {
         deliverNotifications()
@@ -519,6 +624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             swap.standardError = FileHandle.nullDevice
             DispatchQueue.main.async {
                 guard (try? swap.run()) != nil else { self.updating = false; return }
+                self.quitReason = "aggiornamento alla versione \(u.version)"
                 NSApp.terminate(nil)
             }
         }

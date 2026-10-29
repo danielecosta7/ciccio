@@ -48,6 +48,8 @@ export class LocalServers {
   onAdded?: (s: LocalServer) => void;
   /** Server aggiunti o tolti. */
   onChanged?: () => void;
+  /** Config riletta e valida (anche se i server non cambiano): per le altre voci, come i ponti SSH. */
+  onReloaded?: () => void;
 
   constructor(private configPath: string, private cfg: CompanionConfig, private opts: LocalServersOptions = {}) {
     this.apply(cfg, false);
@@ -144,6 +146,7 @@ export class LocalServers {
     const r = this.apply(next, true);
     const parts = [r.added.length ? `aggiunti ${r.added.join(', ')}` : '', r.removed.length ? `tolti ${r.removed.join(', ')}` : '', r.restarted.length ? `riavviati ${r.restarted.join(', ')}` : ''].filter(Boolean);
     if (parts.length) log(`config ricaricata · ${parts.join(' · ')}`);
+    this.onReloaded?.();
     return true;
   }
 

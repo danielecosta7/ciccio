@@ -2,14 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { OP_REF } from '../../shared/companion.js';
+import { OP_REF, parseBridgeTarget } from '../../shared/companion.js';
 
 // Config locale del companion: dove sta Ciccio, il token del dispositivo e i server MCP da esporre.
 // I server MCP si scrivono come in .mcp.json: un comando stdio, oppure un indirizzo locale (sse/http).
 // Nei valori di `env` e `headers` una chiave si scrive come riferimento a 1Password (op://vault/elemento/campo):
 // il companion la legge all'avvio del server (1Password chiede Windows Hello o Touch ID) e non la salva da nessuna parte.
 
-export const VERSION = '0.8.0';
+export const VERSION = '0.9.0';
 
 /** Cartella del companion: config, registro, PID e copia in background. CICCIO_COMPANION_HOME la sposta (prove). */
 export const configDir = () => process.env.CICCIO_COMPANION_HOME || path.join(os.homedir(), '.ciccio-companion');
@@ -169,6 +169,14 @@ const Config = z.object({
     segreti: z.array(z.string().regex(OP_REF, 'riferimento op://vault/elemento/campo')).default([]),
     ssh: z.array(z.string().regex(/^[\w.@+-]{1,64}@[\w.:[\]-]{1,255}$/, 'utente@server, come in known_hosts')).default([]),
   }).default({ segreti: [], ssh: [] }),
+  /**
+   * Ponti SSH (ponte.ts): server SSH che Ciccio raggiunge passando da questo PC, come "host:porta" (22 se manca),
+   * con nome host o IPv4. Solo queste destinazioni esatte; si aggiungono con «Consenti» nella finestra del PC
+   * (proposta da Ciccio › Configurazione › Server SSH) o a mano, e si tolgono da Ciccio o a mano.
+   */
+  ssh: z.object({
+    ponti: z.array(z.string().refine((v) => !!parseBridgeTarget(v), 'host o host:porta (nome o IPv4, es. 192.168.1.50:22)')).max(100).default([]),
+  }).default({ ponti: [] }),
 });
 export type CompanionConfig = z.infer<typeof Config>;
 
@@ -204,6 +212,7 @@ export function templateConfig(token: string, server: string): CompanionConfig {
     token,
     notifications: true,
     onePassword: { segreti: [], ssh: [] },
+    ssh: { ponti: [] },
     // Le config nuove hanno già tutto quello che aggiungerebbero le migrazioni.
     migrazioni: MIGRAZIONI.map((m) => m.nome),
     mcpServers: {

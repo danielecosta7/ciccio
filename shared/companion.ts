@@ -5,8 +5,10 @@
 //                           companion/servers { servers }            (quando cambiano)
 //                           companion/onepassword { sshAgent, cli }  (quando 1Password cambia)
 //                           companion/usage { buckets, at }          (consumi di Claude Code del PC, ogni ora: shared/consumi.ts)
+//                           companion/ssh-bridges { targets }        (quando cambiano i ponti SSH consentiti, vedi sotto)
 //       Ciccio → companion  tools/call { id, params: { server, name, arguments } }
 //                           notifications/cancelled { requestId }    (la sessione ha interrotto)
+//       nei due versi        ssh/bridge-data, ssh/bridge-close       (ponti SSH aperti, vedi sotto)
 // Le risposte sono { id, result } oppure { id, error: { code, message } }.
 
 export const COMPANION_PROTOCOL = 1;
@@ -38,9 +40,57 @@ export interface HelloParams {
   notifications?: boolean;
   /** Cosa offre 1Password su questo PC: l'agent SSH e la CLI op (lettura dei segreti con Touch ID). */
   onePassword?: OnePasswordFeatures;
+  /** Ponti SSH consentiti su questo PC, come "host:porta" (ssh.ponti nella config, vedi sotto). */
+  sshBridges?: string[];
 }
 
 export interface OnePasswordFeatures { sshAgent: boolean; cli: boolean }
+
+// ── Ponti SSH attraverso il PC ──────────────────────────────────────────
+// Per i server SSH che il VPS non raggiunge (es. 192.168.1.50 nella rete dell'ufficio): il PC con il companion
+// apre la connessione TCP e Ciccio ci fa passare i byte di ssh. Il PC decide quali destinazioni: solo le voci
+// "host:porta" esatte di ssh.ponti nella sua config, che dice a Ciccio in hello (sshBridges) e in
+// companion/ssh-bridges { targets } quando cambiano.
+//
+// Ciccio → companion, richieste con id e risposta:
+//   ssh/bridge-open    { id, host, port }          → { ok: true }    apre il ponte `id` (scelto da Ciccio) verso
+//                                                                     host:porta, solo se è in ssh.ponti; errore se no
+//   ssh/bridge-propose { host, port, motivo? }     → { esito }       finestra sul PC: «Consenti» lo aggiunge a ssh.ponti;
+//                                                                     esito 'consentito' | 'già' | 'rifiutato' | 'nessuna_risposta'
+//   ssh/bridge-remove  { host, port }              → { tolto }       lo toglie da ssh.ponti (e chiude i suoi ponti aperti)
+// Poi, nei due versi, notifiche senza id:
+//   ssh/bridge-data    { id, data }                 byte del ponte in base64, al massimo SSH_BRIDGE_CHUNK per messaggio
+//   ssh/bridge-close   { id, reason? }              chiuso da quella parte: l'altra chiude il suo socket
+// Ogni parte smette di leggere dal suo socket quando la WebSocket ha troppo in coda (bufferedAmount), e riprende
+// quando si svuota. Quando il collegamento cade si chiudono tutti i ponti; al massimo SSH_BRIDGE_MAX per PC; un
+// ponte senza traffico per SSH_BRIDGE_IDLE_MS si chiude da solo.
+export const SSH_BRIDGE_OPEN = 'ssh/bridge-open';
+export const SSH_BRIDGE_PROPOSE = 'ssh/bridge-propose';
+export const SSH_BRIDGE_REMOVE = 'ssh/bridge-remove';
+export const SSH_BRIDGE_DATA = 'ssh/bridge-data';
+export const SSH_BRIDGE_CLOSE = 'ssh/bridge-close';
+export const SSH_BRIDGES_CHANGED = 'companion/ssh-bridges';
+export const SSH_BRIDGE_CHUNK = 32 * 1024;
+export const SSH_BRIDGE_MAX = 8;
+export const SSH_BRIDGE_IDLE_MS = 2 * 60 * 60_000;
+export const SSH_BRIDGE_ID = /^[A-Za-z0-9_-]{1,40}$/;
+export type BridgeProposal = 'consentito' | 'già' | 'rifiutato' | 'nessuna_risposta';
+
+/**
+ * Destinazione di un ponte: nome host o IPv4, con la porta (22 se manca). Minuscole; niente utente, spazi o IPv6.
+ * null se non è valida.
+ */
+export function parseBridgeTarget(raw: string, port?: number): { host: string; port: number; key: string } | null {
+  const m = /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,62})(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}))*)(?::(\d{1,5}))?$/.exec(String(raw ?? '').trim());
+  if (!m || m[1].length > 253 || /-(\.|$)/.test(m[1])) return null;
+  if (m[2] != null && port != null) return null;
+  const p = port ?? (m[2] != null ? Number(m[2]) : 22);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return null;
+  const host = m[1].toLowerCase();
+  // Quattro numeri: deve essere un IPv4 vero (niente 999.1.1.1 o 010.0.0.1, che i resolver leggono a modo loro).
+  if (/^[\d.]+$/.test(host) && !/^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(host)) return null;
+  return { host, port: p, key: `${host}:${p}` };
+}
 
 // ── 1Password ───────────────────────────────────────────────────────────
 // Ciccio → companion, richieste con id e risposta:
