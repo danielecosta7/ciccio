@@ -9,7 +9,7 @@ import { OP_REF, parseBridgeTarget } from '../../shared/companion.js';
 // Nei valori di `env` e `headers` una chiave si scrive come riferimento a 1Password (op://vault/elemento/campo):
 // il companion la legge all'avvio del server (1Password chiede Windows Hello o Touch ID) e non la salva da nessuna parte.
 
-export const VERSION = '0.9.0';
+export const VERSION = '0.9.1';
 
 /** Cartella del companion: config, registro, PID e copia in background. CICCIO_COMPANION_HOME la sposta (prove). */
 export const configDir = () => process.env.CICCIO_COMPANION_HOME || path.join(os.homedir(), '.ciccio-companion');

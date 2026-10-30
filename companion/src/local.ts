@@ -2,9 +2,9 @@ import { EventEmitter } from 'node:events';
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { SSEClientTransport, SseError } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { ToolListChangedNotificationSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, McpError, ToolListChangedNotificationSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -17,9 +17,20 @@ import { dim, green, log, yellow } from './log.js';
 import { detachChrome, ensureChrome, type DetachedChrome } from './chrome-mac.js';
 
 const RETRY_MS = 30_000;
+/** I primi tentativi dopo una caduta sono più ravvicinati: un server riavviato (Affinity) torna in pochi secondi. */
+const FAST_RETRY_MS = [2_000, 5_000, 10_000];
 /** 1Password non ha dato una chiave (annullato, bloccato): si richiede di rado, ogni richiesta è una finestra sul PC. */
 const SECRET_RETRY_MS = 10 * 60_000;
 const CALL_TIMEOUT_MS = 10 * 60_000;
+/** Una chiamata ancora in corso lo dice nel registro a questo ritmo, così si vede dove resta appesa. */
+const SLOW_CALL_LOG_MS = 30_000;
+/** Il ping che dice se il server risponde ancora, dopo una chiamata andata in timeout. */
+const PING_TIMEOUT_MS = 5_000;
+/**
+ * Il server ha perso la sessione (riavviato, o ritrovata dopo una caduta della rete): la richiesta non è
+ * stata eseguita, quindi si può riprovare dopo aver riaperto il collegamento.
+ */
+const LOST_SESSION = /session not (initialized|found)|unable to connect|\(HTTP 404\)/i;
 
 /** Opzioni dei server integrati: «file» (chiedi_accesso, trasferimenti) e «comandi» (proposte). */
 export interface BuiltinOptions { file?: FileServerOptions; comandi?: CommandsServerOptions }
@@ -59,6 +70,8 @@ export class LocalServer extends EventEmitter {
   private stderrTail = '';
   private stopped = false;
   private lastError = '';
+  /** Tentativi di avvio falliti di fila (azzerati a collegamento riuscito). */
+  private failures = 0;
   /** Sul Mac, Chrome aperto a parte (vedi chrome-mac.ts): si apre alla prima chiamata. */
   private chrome: DetachedChrome | null = null;
   private chromeUsed = false;
@@ -113,8 +126,10 @@ export class LocalServer extends EventEmitter {
       if (this.client !== client) return;
       this.client = null;
       this.set({ status: 'offline', error: 'scollegato', tools: [] });
-      this.scheduleRetry();
+      log(`${yellow('○')} ${this.name}: collegamento chiuso · riprovo a breve`);
+      this.scheduleRetry(FAST_RETRY_MS[0]);
     };
+    client.onerror = (err) => this.transportError(client, err);
     client.setNotificationHandler(ToolListChangedNotificationSchema, () => { void this.refresh(); });
     try {
       await client.connect(await this.transport(), { timeout: 20_000 });
@@ -122,6 +137,7 @@ export class LocalServer extends EventEmitter {
       this.state.instructions = client.getInstructions();
       await this.refresh();
       this.lastError = '';
+      this.failures = 0;
     } catch (err) {
       await client.close().catch(() => undefined);
       const detail = this.stderrTail.trim().split('\n').pop() ?? '';
@@ -129,9 +145,10 @@ export class LocalServer extends EventEmitter {
       this.set({ status: 'offline', error: msg, tools: [] });
       const secret = err instanceof SecretError;
       // Lo stesso errore a ogni tentativo si scrive una volta sola (es. Affinity chiuso).
-      if (msg !== this.lastError) log(`${yellow('○')} ${this.name}: non disponibile (${msg}) · riprovo ogni ${secret ? '10 minuti' : '30 s'}`);
+      if (msg !== this.lastError) log(`${yellow('○')} ${this.name}: non disponibile (${msg}) · riprovo ${secret ? 'ogni 10 minuti' : 'a breve, poi ogni 30 s'}`);
       this.lastError = msg;
-      this.scheduleRetry(secret ? SECRET_RETRY_MS : RETRY_MS);
+      this.scheduleRetry(secret ? SECRET_RETRY_MS : FAST_RETRY_MS[this.failures] ?? RETRY_MS);
+      this.failures++;
     }
   }
 
@@ -169,6 +186,8 @@ export class LocalServer extends EventEmitter {
 
   /** `transfer`: il file preparato da Ciccio, che arriva solo agli strumenti integrati (mai a un server esterno). */
   async call(name: string, args: Record<string, unknown> | undefined, signal: AbortSignal, transfer?: TransferParams): Promise<CallToolResult> {
+    // Collegamento in riapertura (sessione persa): la chiamata aspetta invece di partire su uno morto.
+    if (this.reconnecting) await this.reconnecting;
     if (!this.client || this.state.status !== 'online') throw new Error(`${this.name} non è disponibile sul PC in questo momento`);
     if (!this.state.tools.some((t) => t.name === name)) throw new Error(`strumento ${name} non esposto da ${this.name}`);
     if (this.chrome) {
@@ -178,15 +197,59 @@ export class LocalServer extends EventEmitter {
       if (!this.client) throw new Error(`${this.name} non è disponibile sul PC in questo momento`);
     }
     const meta = transfer && 'builtin' in this.entry ? { _meta: { [TRANSFER_META]: transfer } } : {};
-    return (await this.client.callTool({ name, arguments: args, ...meta }, undefined, { signal, timeout: CALL_TIMEOUT_MS, resetTimeoutOnProgress: true })) as CallToolResult;
+    const run = async () => {
+      if (!this.client) throw new Error(`${this.name} non è disponibile sul PC in questo momento`);
+      return (await this.client.callTool({ name, arguments: args, ...meta }, undefined, { signal, timeout: CALL_TIMEOUT_MS, resetTimeoutOnProgress: true })) as CallToolResult;
+    };
+    const t0 = Date.now();
+    const size = JSON.stringify(args ?? {}).length;
+    const slow = setInterval(() => log(dim(`… ${this.name} · ${name} ancora in corso da ${Math.round((Date.now() - t0) / 1000)} s (${size} caratteri di parametri)`)), SLOW_CALL_LOG_MS);
+    slow.unref();
+    const used = this.client;
+    try {
+      try { return await run(); } catch (err) {
+        if (signal.aborted) throw err;
+        if (err instanceof McpError && err.code === ErrorCode.RequestTimeout) await this.diagnose(name, t0);
+        if (!('url' in this.entry) || !LOST_SESSION.test((err as Error).message)) throw err;
+        // Sessione persa (Affinity riavviato o caduto): si riapre il collegamento e si riprova una volta sola.
+        // Se nel frattempo l'ha già riaperto un'altra chiamata non serve rifarlo.
+        log(`${yellow('○')} ${this.name}: ${name} ha perso la sessione (${(err as Error).message.slice(0, 120)}) · mi ricollego e riprovo`);
+        if (this.client === used) await this.reconnect();
+        return await run();
+      }
+    } finally {
+      clearInterval(slow);
+    }
   }
 
-  /** Chiude e riapre il collegamento con il server MCP locale (stessi strumenti). */
-  private async reconnect() {
-    const c = this.client;
-    this.client = null;
-    await c?.close().catch(() => undefined);
-    await this.start();
+  /** Una chiamata è andata in timeout: nel registro si scrive se il server risponde ancora, e l'ultimo messaggio d'errore del processo. */
+  private async diagnose(name: string, t0: number) {
+    const alive = await this.client?.ping({ timeout: PING_TIMEOUT_MS }).then(() => true, () => false);
+    const detail = this.stderrTail.trim().split('\n').pop();
+    log(`${yellow('○')} ${this.name}: ${name} senza risposta dopo ${Math.round((Date.now() - t0) / 1000)} s · il server ${alive ? 'risponde ancora al ping (è lo strumento a essere bloccato)' : 'non risponde al ping'}${detail ? ` · ${detail.slice(0, 200)}` : ''}`);
+  }
+
+  /**
+   * Errore dal collegamento (non da una chiamata). Con SSE, se il flusso cade la libreria si riapre da sola su una
+   * sessione nuova del server senza rifare l'handshake: ogni chiamata dà «Session not initialized» e il collegamento
+   * non risulta mai chiuso. Meglio ripartire da zero subito.
+   */
+  private transportError(client: Client, err: Error) {
+    if (this.client !== client) return;
+    log(`${yellow('○')} ${this.name}: errore di collegamento (${err.message.slice(0, 160)})`);
+    if (err instanceof SseError) void this.reconnect();
+  }
+
+  private reconnecting: Promise<void> | null = null;
+
+  /** Chiude e riapre il collegamento con il server MCP locale (stessi strumenti). Una sola volta anche se lo chiedono in tanti. */
+  private reconnect(): Promise<void> {
+    return this.reconnecting ??= (async () => {
+      const c = this.client;
+      this.client = null;
+      await c?.close().catch(() => undefined);
+      await this.start();
+    })().finally(() => { this.reconnecting = null; });
   }
 
   async stop() {

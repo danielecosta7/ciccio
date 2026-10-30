@@ -193,7 +193,11 @@ Con l'app installata, `ciccio-companion` non è nel PATH: si usa il percorso del
 
 La prima volta `init` vuole anche il server (`--server https://ciccio.tuo-tailnet.ts.net`); dopo usa quello salvato. Con `--server` si cambia server.
 
-Per Affinity: in Affinity › Impostazioni attiva il server MCP (ascolta su `localhost:6767`); il companion ci parla direttamente, senza Claude desktop. Se Affinity è chiuso il server risulta «non disponibile» e il companion riprova ogni 30 secondi.
+Per Affinity: in Affinity › Impostazioni attiva il server MCP (ascolta su `localhost:6767`); il companion ci parla direttamente, senza Claude desktop. Se Affinity è chiuso il server risulta «non disponibile» e il companion riprova dopo 2, 5 e 10 secondi, poi ogni 30.
+
+Vale per tutti i server MCP collegati al companion (Affinity, Chrome, Lightroom, gli altri): se un server SSE o HTTP perde la sessione (riavviato, o flusso caduto: «Session not initialized», «Unable to connect») il companion riapre il collegamento da solo e riprova la chiamata una volta; le chiamate che arrivano mentre si ricollega aspettano. Una chiamata già partita quando il collegamento cade non si rilancia, perché non si sa se il server l'abbia eseguita: l'errore arriva all'agente. Prova: `pnpm exec tsx companion/test/ripresa.ts`.
+
+**Registro** (`~/.ciccio-companion/companion.log` quando gira in background; `ciccio-companion status` mostra le ultime righe). Oltre a `→`/`←` per ogni chiamata, scrive: la caduta del collegamento a un server (`errore di collegamento`, `collegamento chiuso`), la sessione persa e il ricollegamento, una riga ogni 30 secondi mentre una chiamata è ancora in corso (`… affinity · execute_script ancora in corso da 60 s`, con la dimensione dei parametri), e al timeout di 10 minuti se il server risponde ancora al ping (strumento bloccato) o no (server bloccato o morto).
 
 Per Chrome: la config usa [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) con un profilo dedicato in `~/.ciccio-companion/chrome-profile` e le statistiche verso Google spente (`--usageStatistics=false`, `--performanceCrux=false`). Serve Node sul PC (per `npx`). Al primo uso Chrome si apre con il profilo vuoto: accedi a mano ai siti che servono agli agenti, poi restano.
 
