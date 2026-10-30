@@ -114,8 +114,10 @@ await stop(a);
 let errore = '';
 try { await quale(local); } catch (e) { errore = (e as Error).message; }
 ok(/non è disponibile|Unable to connect|fetch failed|SSE error|Connection closed/i.test(errore), `server spento: errore chiaro (${errore.slice(0, 90)})`);
+const prima4 = collegamenti();
 a = await fakeAffinity(port, 'quarto');
-ok(await wait(() => local.state.status === 'online', 45_000), 'server tornato: il companion lo riprende');
+// Lo stato resta «online» mentre si ricollega: si aspetta il collegamento nuovo, non lo stato.
+ok(await wait(() => collegamenti() > prima4 && local.state.status === 'online', 45_000), 'server tornato: il companion lo riprende');
 ok(await quale(local) === 'quarto', 'e risponde');
 
 await local.stop();
