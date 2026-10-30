@@ -92,7 +92,8 @@ export interface UserMeta { kind: 'user'; attachments: Attachment[]; routine?: s
 export interface SlashCommandView { name: string; description: string; /** Argomenti attesi, per esempio «<file>». */ hint?: string }
 
 /** Avviso spontaneo di Ciccio su una chat di un agente (giro finito, permesso richiesto). */
-export interface NoticeMeta { kind: 'notice'; agentId: string; chatId: string; chatTitle: string; tone: 'done' | 'wait' | 'block'; /** Avviso di un permesso o di una domanda: l'app desktop ci mette i pulsanti. */ approvalId?: string }
+export interface NoticeMeta { kind: 'notice'; agentId: string; chatId: string; chatTitle: string; tone: 'done' | 'wait' | 'block'; /** Avviso di un permesso o di una domanda: l'app desktop ci mette i pulsanti. */ approvalId?: string;
+  /** L'utente ha già risposto direttamente nella chat dopo questo avviso: non c'è più niente da decidere. */ superseded?: boolean }
 
 export type MessageMeta = ToolMeta | TodoMeta | UserMeta | NoticeMeta;
 

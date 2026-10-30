@@ -22,7 +22,7 @@ SCRIPT_DIR="$(dirname "$SELF")"
 STEPS=(sistema utente pacchetti node tailscale linger repo copia-root ciccio firewall helper schermo voce dominio fine)
 # Script che root esegue: vanno nella copia di root, mai eseguiti dalla cartella dell'utente.
 ROOT_FILES=(setup.sh egress-firewall.sh egress-helper.sh ciccio-egress-allow.sh apt-helper.sh ciccio-apt-install.sh
-  ssh-helper.sh ciccio-ssh-allow.sh ssh-hosts.sh)
+  app-helper.sh ciccio-app-install.sh ssh-helper.sh ciccio-ssh-allow.sh ssh-hosts.sh)
 PKGS=(git gh bubblewrap socat curl ca-certificates xz-utils build-essential python3 python3-venv ufw)
 
 declare -A DESC=(
@@ -141,7 +141,7 @@ can_sudo() {
   id -nG "$1" | tr ' ' '\n' | grep -qxE 'sudo|admin|wheel|root' && return 0
   # Le sole regole di Ciccio (gli helper) non contano.
   sudo -n -l -U "$1" 2>/dev/null | grep -E '^[[:space:]]+\(' \
-    | grep -vE 'NOPASSWD: /usr/local/sbin/ciccio-(egress-allow|apt-install|ssh-allow)$' | grep -q .
+    | grep -vE 'NOPASSWD: /usr/local/sbin/ciccio-(egress-allow|apt-install|app-install|ssh-allow)$' | grep -q .
 }
 restart_ciccio() { as_user systemctl --user try-restart ciccio.service >/dev/null 2>&1 || true; }
 
@@ -414,7 +414,7 @@ check_copia_root() {
 refresh_helpers() {
   local line inst helper src
   for line in "egress-helper.sh ciccio-egress-allow ciccio-egress-allow.sh" "apt-helper.sh ciccio-apt-install ciccio-apt-install.sh" \
-              "ssh-helper.sh ciccio-ssh-allow ciccio-ssh-allow.sh"; do
+              "app-helper.sh ciccio-app-install ciccio-app-install.sh" "ssh-helper.sh ciccio-ssh-allow ciccio-ssh-allow.sh"; do
     read -r inst helper src <<<"$line"
     if [[ -f "/usr/local/sbin/$helper" ]] && ! cmp -s "$LIB/$src" "/usr/local/sbin/$helper"; then
       bash "$LIB/$inst" "$U" | indent
@@ -631,6 +631,7 @@ do_firewall() {
 HELPERS=(
   "egress-helper.sh|ciccio-egress-allow|ciccio-egress-allow.sh|Domini nuovi su richiesta: un agente chiede un dominio (consenti_dominio), tu approvi in chat, l'helper lo apre nel proxy."
   "apt-helper.sh|ciccio-apt-install|ciccio-apt-install.sh|Programmi di sistema su richiesta: un agente chiede un pacchetto (installa_programma), tu approvi, l'helper installa solo pacchetti ufficiali di Ubuntu."
+  "app-helper.sh|ciccio-app-install|ciccio-app-install.sh|Programmi scaricati su richiesta: un agente chiede un'AppImage o un archivio da un indirizzo https (installa_da_url, es. FreeCAD), tu approvi, l'helper lo estrae in /opt/ciccio-app senza eseguirlo."
   "ssh-helper.sh|ciccio-ssh-allow|ciccio-ssh-allow.sh|Server SSH dalle Impostazioni: aggiungi un server pubblico che gli agenti raggiungono in SSH, senza root a mano."
 )
 check_helper() {

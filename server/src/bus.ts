@@ -29,6 +29,9 @@ export const agentEvents = {
   /** Un avviso nella chat di Ciccio (es. una routine saltata): lo scrive ciccio.ts con le stesse regole degli altri. */
   notice(n: Notice) { internal.emit('notice', n); },
   onNotice(fn: (n: Notice) => void) { internal.on('notice', fn); },
+  /** L'utente ha scritto direttamente in una chat (non per mezzo di Ciccio): gli avvisi su quella chat sono superati. */
+  userWrote(chatId: string) { internal.emit('userWrote', chatId); },
+  onUserWrote(fn: (chatId: string) => void) { internal.on('userWrote', fn); },
   toCiccio(m: ToCiccio) { internal.emit('toCiccio', m); },
   onToCiccio(fn: (m: ToCiccio) => void) { internal.on('toCiccio', fn); },
 };

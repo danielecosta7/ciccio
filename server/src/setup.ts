@@ -17,7 +17,7 @@ import { ownerNameError, rootStep, sshHostError, type GithubLoginState, type Set
 
 const CACHE_MS = 30_000;
 const SSH_HOSTS = '/etc/ciccio/ssh-hosts';
-const HELPERS = ['ciccio-egress-allow', 'ciccio-apt-install', 'ciccio-ssh-allow'] as const;
+const HELPERS = ['ciccio-egress-allow', 'ciccio-apt-install', 'ciccio-app-install', 'ciccio-ssh-allow'] as const;
 const SSH_HELPER = '/usr/local/sbin/ciccio-ssh-allow';
 const OWNER_KEY = 'owner_name';
 
@@ -262,8 +262,8 @@ async function helpersItem(): Promise<SetupItem> {
   if (process.platform !== 'linux') return { ...base, stato: 'facoltativo', dettaglio: 'Solo sul server Linux.' };
   const r = await Promise.all(HELPERS.map((h) => run('sudo', ['-n', '-l', `/usr/local/sbin/${h}`], 3000)));
   const off = HELPERS.filter((_, i) => !r[i].ok);
-  const what: Record<string, string> = { 'ciccio-egress-allow': 'domini nuovi del proxy', 'ciccio-apt-install': 'programmi di sistema', 'ciccio-ssh-allow': 'server SSH da qui' };
-  if (!off.length) return { ...base, stato: 'ok', dettaglio: 'Domini del proxy, programmi di sistema e server SSH si gestiscono da Ciccio.' };
+  const what: Record<string, string> = { 'ciccio-egress-allow': 'domini nuovi del proxy', 'ciccio-apt-install': 'programmi di sistema', 'ciccio-app-install': 'programmi scaricati (AppImage, archivi)', 'ciccio-ssh-allow': 'server SSH da qui' };
+  if (!off.length) return { ...base, stato: 'ok', dettaglio: 'Domini del proxy, programmi di sistema, programmi scaricati e server SSH si gestiscono da Ciccio.' };
   return { ...base, stato: 'avviso', dettaglio: `Spenti: ${off.map((h) => what[h]).join(', ')}. Gli agenti non potranno chiederli.` };
 }
 

@@ -19,6 +19,7 @@ import { Sheet, SheetRow } from '../Sheet';
 import { useBand } from '../viewport';
 import { PermissionDock } from './PermissionDock';
 import { useEdgeSwipeBack } from '../gestures';
+import { outgoing } from '../listContinue';
 import type { AgentInfo, AgentView, Approval, ChatMessage, ChatView, Effort, LiveState } from '../../../shared/types';
 
 /**
@@ -146,7 +147,7 @@ export function ChatPage(props: {
 
   const send = async () => {
     const atts = files.ready;
-    const text = draft.trim();
+    const text = outgoing(draft);
     if (!text && !atts.length) return;
     setDraft(''); files.clear(); setError('');
     toBottom();

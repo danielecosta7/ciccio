@@ -88,7 +88,7 @@ Quando un agente (o Ciccio) usa lo strumento `AskUserQuestion`, sopra il campo d
 
 ### Programmi di sistema su richiesta
 
-`ciccio` non ha sudo, quindi un agente non può installare da sé un programma che manca (es. `openscad`). Lo chiede con lo strumento `installa_programma({ pacchetto, motivo })` (`server/src/systemPackages.ts`):
+`ciccio` non ha sudo, quindi un agente non può installare da sé un programma che manca (es. `openscad`). Lo chiede con lo strumento `installa_programma({ pacchetto, motivo })` (`server/src/systemPackages.ts`; per quello che Ubuntu non ha, vedi «Programmi che Ubuntu non ha» sotto):
 
 1. Ciccio controlla il nome e, senza root, simula l'installazione (`apt-get -s`): se il pacchetto è già installato lo dice all'agente, se non esiste o non va bene (vedi sotto) rifiuta senza disturbare l'utente.
 2. L'utente approva nella card dei permessi, che mostra pacchetto, motivo, numero di dipendenze ed eventuali librerie aggiornate. Lo chiede **sempre**, in ogni livello di autorizzazione («Salta permessi» compreso) e senza «consenti sempre»; nemmeno Ciccio può approvare al posto suo.
@@ -113,6 +113,29 @@ Toglierlo (gli agenti riceveranno «l'installazione dal server non è attiva»; 
 
 ```bash
 bash /usr/local/lib/ciccio/apt-helper.sh --remove
+```
+
+#### Programmi che Ubuntu non ha (AppImage e archivi)
+
+Per quello che manca dai repository (es. FreeCAD, che esce solo come AppImage) c'è `installa_da_url({ nome, url, comandi?, tipo?, sha256?, motivo })`, nello stesso server `ciccio_sistema`. Lo hanno gli agenti **e Ciccio**: se un agente non riesce, lo passa a Ciccio, che può lanciarlo lui (come `installa_programma` e `consenti_dominio`). In ogni caso lo approva solo l'utente, ogni volta, in ogni livello e senza «sempre»; Ciccio non può approvare al suo posto.
+
+1. Ciccio controlla il nome, che l'indirizzo sia https e che il tipo sia chiaro (`.AppImage`, `.tar.gz`, `.tar.xz`, `.tar.bz2`; niente `.deb` né script, che girerebbero come root), e che il nome del sito sia pubblico (niente IP, nomi locali o nomi che puntano a indirizzi interni, anche nei rimandi).
+2. La card mostra indirizzo intero, nome, comandi da collegare, sha256 atteso (se l'agente lo conosce) e motivo.
+3. Dopo il sì il server scarica come utente normale in una cartella sua (`~/.ciccio/app-*`, fino a 4 GB, 25 minuti), calcola lo sha256 e lancia `sudo -n /usr/local/sbin/ciccio-app-install`.
+
+L'helper (`deploy/ciccio-app-install.sh`) rifà i controlli da root:
+
+- il file deve essere dell'utente di Ciccio, in una cartella solo sua; se ne fa una **copia di root** e se ne ricontrolla lo sha256, così dopo l'approvazione il file dell'utente non conta più;
+- **nessun codice del programma gira**: l'AppImage si estrae con `unsquashfs` leggendo l'offset dall'ELF (non si lancia), gli archivi con `tar`, entrambi come `nobody` in una cartella vuota; poi tutto passa a root, senza setuid/setgid, senza scrittura per altri, senza file speciali;
+- il programma va solo in `/opt/ciccio-app/<nome>`; un programma già lì si sostituisce solo se l'ha messo l'helper (marcatore `.ciccio-app`);
+- i comandi sono link in `/usr/local/bin` che puntano dentro il programma: mai su un comando di sistema, mai su un file che non sia un link di Ciccio; un percorso che non esiste o esce dal programma dà un avviso e nessun link, il programma resta installato (l'esito elenca gli eseguibili trovati, che si lanciano anche da `/opt/ciccio-app/<nome>/…`);
+- una installazione alla volta, ogni richiesta (anche rifiutata) in `/var/log/ciccio-app.log`; `ciccio-app-install togli <nome>` toglie programma e link.
+
+Per le AppImage serve `squashfs-tools` (pacchetto Ubuntu: lo si chiede con `installa_programma`). Il limite è lo stesso dell'altro helper, ma più pesante: chi avesse una shell come `ciccio` fuori dalla sandbox potrebbe far mettere a root, senza chiedere, file propri in `/opt/ciccio-app` e link in `/usr/local/bin` (non su comandi esistenti). Chi non vuole questo rischio non attiva l'helper.
+
+```bash
+bash /usr/local/lib/ciccio/app-helper.sh          # attiva o aggiorna
+bash /usr/local/lib/ciccio/app-helper.sh --remove # toglie helper e regola sudo (i programmi restano)
 ```
 
 ### Routine

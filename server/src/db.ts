@@ -323,6 +323,11 @@ export const store = {
     const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT ?`).all(chatId, limit) as Record<string, unknown>[];
     return rows.reverse().map(rowToMessage);
   },
+  /** Messaggi di un ruolo scritti dopo un certo momento, dal più vecchio. */
+  messagesSince(chatId: string, role: MessageRole, ts: number): ChatMessage[] {
+    const rows = db.prepare(`SELECT ${MSG_COLS} FROM messages WHERE chat_id = ? AND role = ? AND ts > ? ORDER BY id`).all(chatId, role, ts) as Record<string, unknown>[];
+    return rows.map(rowToMessage);
+  },
   countMessages(chatId: string, role: MessageRole): number {
     return (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_id = ? AND role = ?`).get(chatId, role) as { n: number }).n;
   },

@@ -202,7 +202,7 @@ export function ClaudeUsage({ state, compact = false }: { state: UsageState | nu
 
 /** Nome leggibile di uno strumento: mcp__claude_ai_Linear__list_issues → «Linear · list issues». */
 /** Permessi che dai solo tu, ogni volta: chiavi SSH, segreti di 1Password e programmi di sistema (niente «sempre»). */
-export const onlyOnce = (tool: string) => tool === 'SSH' || tool === 'mcp__ciccio_credenziali__usa_credenziale' || tool === 'mcp__ciccio_sistema__installa_programma' || tool === 'mcp__ciccio_sistema__consenti_dominio' || tool === 'mcp__ciccio_strumenti__crea_routine';
+export const onlyOnce = (tool: string) => tool === 'SSH' || tool === 'mcp__ciccio_credenziali__usa_credenziale' || tool === 'mcp__ciccio_sistema__installa_programma' || tool === 'mcp__ciccio_sistema__installa_da_url' || tool === 'mcp__ciccio_sistema__consenti_dominio' || tool === 'mcp__ciccio_strumenti__crea_routine';
 /** Proposte di strumenti nuovi per il progetto: solo «Consenti sempre» (lo salva) o «Rifiuta». */
 export const alwaysOnly = (tool: string) => tool === 'mcp__ciccio_strumenti__proponi_comando' || tool === 'mcp__ciccio_strumenti__proponi_server_mcp';
 
@@ -210,6 +210,7 @@ export function toolLabel(tool: string): string {
   if (tool === 'SSH') return 'Chiavi SSH di 1Password';
   if (tool === 'mcp__ciccio_credenziali__usa_credenziale') return 'Segreto di 1Password';
   if (tool === 'mcp__ciccio_sistema__installa_programma') return 'Programma di sistema';
+  if (tool === 'mcp__ciccio_sistema__installa_da_url') return 'Programma scaricato da internet';
   if (tool === 'mcp__ciccio_sistema__consenti_dominio') return 'Dominio nuovo nel proxy';
   if (tool === 'mcp__ciccio_strumenti__proponi_comando') return 'Strumento nuovo per il progetto';
   if (tool === 'mcp__ciccio_strumenti__proponi_server_mcp') return 'Server MCP nuovo per il progetto';

@@ -19,6 +19,15 @@ export function listEnter(e: KeyboardEvent<HTMLTextAreaElement>, setValue: (v: s
 const LIST_INDENT = '   ';
 
 /**
+ * Testo da inviare: come `trim()`, ma se il messaggio comincia con un elenco rientrato da `listIndent` toglie il rientro
+ * a tutte le righe. Il solo `trim()` lo toglierebbe alla prima voce e basta, e le altre diventerebbero un elenco annidato.
+ */
+export function outgoing(text: string): string {
+  const dedent = /^ {1,3}(\d{1,3}[.)]|[-*•]) /.test(text.replace(/^\s*\n/, ''));
+  return (dedent ? text.replace(/^ {1,3}/gm, '') : text).trim();
+}
+
+/**
  * Elenco appena cominciato: scrivendo «1. » o «- » a inizio riga, la riga rientra un poco dal bordo,
  * così si vede che l'elenco è attivo (le voci successive tengono lo stesso rientro).
  * Da usare in onChange al posto di e.target.value.

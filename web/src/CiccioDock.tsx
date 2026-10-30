@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDictation } from './voice/hooks';
 import { ContextMeter, ContextPanel, ContextWarning } from './ContextMeter';
-import { listEnter, listIndent } from './listContinue';
+import { listEnter, listIndent, outgoing } from './listContinue';
 import { autoGrow } from './autoGrow';
 import { sentTexts, useSentHistory } from './sentHistory';
 import { usePromptSuggestion } from './promptSuggestion';
@@ -103,7 +103,7 @@ export function CiccioDock(props: {
 
   const send = (text: string) => {
     if (dict.listening) dict.stop();
-    const t = text.trim();
+    const t = outgoing(text);
     if (!t) return;
     setDraft('');
     toBottom();

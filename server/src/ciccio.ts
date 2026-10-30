@@ -18,10 +18,11 @@ import { noteTurn, type TurnOrigin } from './consumi.js';
 import { pcMcpServers, pcPrompt, pcToolHints, releasePcServers } from './companion.js';
 import { ciccioKey, hoistCommand, saveCommands } from './commands.js';
 import { PROPOSALS, ROUTINE_TOOL, projectToolViews, removeProjectTool } from './projectTools.js';
+import { EGRESS_TOOL, INSTALL_TOOL, INSTALL_URL_TOOL, SYSTEM_SERVER, systemServer } from './systemPackages.js';
 import { describeCron } from '../../shared/cron.js';
 import { dayIn } from '../../shared/tz.js';
 import { createRoutine, findRoutine, fireRoutine, removeRoutine, routineViews, updateRoutine } from './routines.js';
-import { ASK_TOOL, CICCIO_THREAD, EFFORTS, MODELS, type ContextInfo, type Effort, type NoticeMeta, type Recap, type RecapTone, type RoutineView } from '../../shared/types.js';
+import { ASK_TOOL, CICCIO_THREAD, EFFORTS, MODELS, type ChatMessage, type ContextInfo, type Effort, type NoticeMeta, type Recap, type RecapTone, type RoutineView } from '../../shared/types.js';
 
 const CICCIO: Thread = { chatId: CICCIO_THREAD, agentId: CICCIO_THREAD };
 
@@ -191,11 +192,13 @@ Cosa puoi fare:
 - Routine (routine): messaggi che partono da soli verso un progetto a orari fissi (es. «ogni lunedì alle 8 fai il punto delle PR»). Le elenchi, le metti in pausa, le lanci subito o le togli; crearne una la conferma ${OWNER}.
 Alcune azioni (alzare un livello ad Auto o Ignora, aggiungere regole, consentire permessi) le conferma ${OWNER} con un tocco: chiedile pure, il sistema gli mostra la richiesta.
 - Usare i connettori di ${OWNER} (posta, calendario, Notion e gli altri strumenti mcp__ disponibili). Le letture vanno da sole; per azioni che inviano, creano o modificano qualcosa fuori, ${OWNER} conferma nella chat.
+- Installare programmi sul server quando ${OWNER} lo chiede o un agente ne ha bisogno e non può farlo da sé: installa_programma (pacchetto ufficiale di Ubuntu), installa_da_url (AppImage o archivio tar da un indirizzo https, per quello che Ubuntu non ha, es. FreeCAD) e consenti_dominio (aprire un sito nel proxy). Ogni volta ${OWNER} approva dalla card, vedendo cosa viene installato e da dove: non puoi approvare al suo posto. Prima prova installa_programma; per l'indirizzo cerca la release ufficiale del progetto e usa il link diretto al file.
 - Cercare sul web (WebSearch).
 
 Tu e le chat: le chat non si parlano tra loro, passa tutto da te.
 - Con scrivi_ad_agente e aspetta_risposta: true, quando quella chat finisce il giro ti arriva la sua risposta («[Risposta di …]») e decidi tu il passo dopo: passarla a un'altra chat, rispondere all'agente o dire a ${OWNER} il risultato in una frase. Usalo solo quando devi davvero continuare tu (passaggi tra progetti, risultati da riportare); per un compito semplice no, a ${OWNER} arriva comunque l'avviso.
 - Un agente può scriverti («[Messaggio da …]»): rispondigli con scrivi_ad_agente in quella chat, coinvolgi un'altra chat o chiedi a ${OWNER}. Per sì/no di ${OWNER}, chiedi a lui: non decidere al suo posto.
+- Le chat vanno avanti anche quando non le guardi: quello che sai di una chat è una foto vecchia, e ${OWNER} le usa anche direttamente. Prima di chiedergli qualcosa che una chat aspetta, controlla con chat_agente (o permessi_in_attesa) che sia ancora aperta. Un avviso «superato» (${OWNER} ha già risposto nella chat) non si riapre: non chiedergli niente e non scrivere alla chat. Se ${OWNER} ti risponde a una domanda che la chat ha già superato, ringrazialo in mezza frase, digli che la chat è già andata avanti e non mandare niente: vale quello che ha detto alla chat. scrivi_ad_agente non parte se ${OWNER} ha scritto in quella chat dopo l'ultima volta che l'hai vista: rileggila e rimanda solo se il messaggio ha ancora senso.
 
 Avvisi: quando un agente finisce un giro o chiede un permesso, il sistema avvisa ${OWNER} a nome tuo nella tua chat; quegli avvisi ti arrivano come contesto nel messaggio successivo. Se ${OWNER} risponde a un avviso ("digli di sì", "fagli aprire la PR"), scrivi a quella chat con scrivi_ad_agente indicando la chat.
 
@@ -250,6 +253,7 @@ const ciccioTools = createSdkMcpServer({
       if (!chats.length) return textResult(`${id} non ha ancora chat.`);
       const c = chat ? chats.find((x) => x.id === chat || x.title.toLowerCase().includes(chat.toLowerCase())) : chats[0];
       if (!c) return textResult(`Nessuna chat "${chat}" in ${id}. Chat: ${chats.map((x) => x.title).join(', ')}`);
+      markSeen(c.id);
       // Il ragionamento dell'agente resta fuori: è lungo e non serve a Ciccio.
       const msgs = store.messages(c.id, (quanti ?? 20) * 2).filter((m) => m.role !== 'thinking').slice(-(quanti ?? 20));
       const list = `Chat di ${id}: ${chats.map((x) => `"${x.title}"`).join(', ')}\nUltimi messaggi di "${c.title}":\n`;
@@ -266,6 +270,7 @@ const ciccioTools = createSdkMcpServer({
         for (const c of a.chats) {
           const recent = store.messages(c.id, 60).filter((m) => m.ts > since && (m.role === 'agent' || m.role === 'error'));
           if (!recent.length && !c.running && !c.pendingApprovals) continue;
+          markSeen(c.id);
           const last = recent[recent.length - 1];
           lines.push(`- ${a.id} · "${c.title}" · ${c.running ? 'al lavoro' : c.status}${c.pendingApprovals ? ` · ${c.pendingApprovals} permessi in attesa` : ''}${last ? ` · ultima risposta: ${last.text.replace(/\s+/g, ' ').slice(0, 400)}` : ''}`);
         }
@@ -278,7 +283,7 @@ const ciccioTools = createSdkMcpServer({
       if (!row) return textResult(`Non trovo un agente "${agente}".`);
       return textResult(readStatusMd(row.path)?.raw ?? 'Questo progetto non ha STATUS.md.');
     }),
-    tool('scrivi_ad_agente', `Manda un messaggio a un agente da parte di ${OWNER}: va nella chat più recente del progetto, in una chat precisa o in una nuova.`, {
+    tool('scrivi_ad_agente', `Manda un messaggio a un agente da parte di ${OWNER}: va nella chat più recente del progetto, in una chat precisa o in una nuova. Se dopo l'ultima volta che hai visto quella chat ${OWNER} ci ha scritto direttamente, il messaggio non parte: ti dice cosa è successo e decidi se rimandarlo.`, {
       agente: z.string(),
       messaggio: z.string().min(1).describe("istruzione chiara e completa per l'agente"),
       chat: z.string().optional().describe('titolo (o parte) o id di una chat esistente'),
@@ -289,7 +294,16 @@ const ciccioTools = createSdkMcpServer({
       if (!id) return textResult(`Non trovo un agente "${agente}". Agenti: ${store.agents().map((r) => r.id).join(', ')}`);
       const target = chat ? store.chats(id).find((x) => x.id === chat || x.title.toLowerCase().includes(chat.toLowerCase())) : undefined;
       if (chat && !target) return textResult(`Nessuna chat "${chat}" in ${id}.`);
+      // Dove andrebbe a finire: se l'utente ci ha scritto dopo l'ultima volta che Ciccio l'ha vista, il messaggio può essere vecchio.
+      const dest = target ?? (nuova_chat ? undefined : store.chats(id)[0]);
+      const moved = dest ? userWroteSince(dest.id) : [];
+      if (dest && moved.length) {
+        // Da adesso la chat è vista: se Ciccio rimanda lo stesso messaggio, parte.
+        markSeen(dest.id);
+        return textResult(`Non l'ho mandato. Dopo l'ultima volta che hai visto "${dest.title}" (${id}) ${OWNER} ci ha scritto direttamente ${moved.length === 1 ? 'una volta' : `${moved.length} volte`}: la chat è andata avanti e il tuo messaggio potrebbe essere vecchio. Ultimi messaggi:\n${recentLines(dest.id, 6)}\nDecidi: se ha ancora senso rimandalo (stessa chiamata, ora passa); altrimenti non mandare niente e di' a ${OWNER} che la chat era già andata avanti.`);
+      }
       const r = sendToAgent(id, messaggio, 'ciccio', { chatId: target?.id, newChat: nuova_chat });
+      markSeen(r.chatId);
       if (aspetta_risposta) waitFor(r.chatId, messaggio);
       return textResult(`Mandato a ${id}, chat "${r.title}": ${r.result === 'started' ? 'è partito' : 'è in coda, parte appena si libera'}.${aspetta_risposta ? ' Quando finisce il giro ti arriva la risposta.' : ''}`);
     }),
@@ -510,7 +524,77 @@ function ciccioNeedsOk(tool: string, input: Record<string, unknown>): string | n
 }
 
 let chatState: Running | null = null;
-const pendingNotes: string[] = [];
+/** Avvisi dati all'utente da quando Ciccio ha scritto l'ultima volta: gli arrivano come contesto nel messaggio dopo. */
+const pendingNotes: { chatId: string; approvalId?: string; wait: boolean; line: string }[] = [];
+
+// ── Cosa sa Ciccio di una chat ──────────────────────────────────────────
+// L'utente scrive anche direttamente alle chat: quello che Ciccio sa di una chat (un avviso, una lettura) è una foto
+// che invecchia. Per ogni chat si ricorda quando Ciccio l'ha vista l'ultima volta; se dopo l'utente ci ha scritto, un
+// messaggio di Ciccio a quella chat (o una domanda all'utente su di lei) si basa su una situazione superata.
+
+const SEEN_KEEP_MS = 30 * 24 * 3_600_000;
+const seenMap = () => store.getKv<Record<string, number>>('ciccio_seen') ?? {};
+
+export function markSeen(chatId: string, at = Date.now()) {
+  if (chatId === CICCIO_THREAD) return;
+  const kept = Object.fromEntries(Object.entries(seenMap()).filter(([, t]) => Date.now() - t < SEEN_KEEP_MS));
+  store.setKv('ciccio_seen', { ...kept, [chatId]: at });
+}
+
+/** Messaggi scritti dall'utente in una chat dopo l'ultima volta che Ciccio l'ha vista (vuoto se non l'ha mai vista). */
+export function userWroteSince(chatId: string): ChatMessage[] {
+  const at = seenMap()[chatId];
+  return at == null ? [] : store.messagesSince(chatId, 'user', at);
+}
+
+function recentLines(chatId: string, n: number): string {
+  const msgs = store.messages(chatId, n * 6).filter((m) => m.role === 'user' || m.role === 'agent' || m.role === 'ciccio').slice(-n);
+  return msgs.map((m) => `[${new Date(m.ts).toLocaleString('it-IT', { timeZone: config.tz })}] ${m.role === 'user' ? OWNER : m.role === 'ciccio' ? 'Ciccio' : 'agente'}: ${m.text.replace(/\s+/g, ' ').slice(0, 400)}`).join('\n') || 'Chat vuota.';
+}
+
+const MOVED_MARK = '[Dopo questo messaggio';
+/** Messaggi di Ciccio ancora in coda: vengono da una chat (messaggio di un agente, risposta attesa), che può essere andata avanti. */
+const queuedFrom = new Map<string, string>();
+
+/** Giri in coda partiti da una chat che poi è andata avanti: Ciccio lo legge prima di agire. */
+function annotateQueued(chatId: string) {
+  chatQueue.forEach((p, i) => {
+    if (queuedFrom.get(p) !== chatId || p.includes(MOVED_MARK)) return;
+    const q = `${p}\n\n${MOVED_MARK} ${OWNER} ha scritto direttamente nella chat: è già andata avanti. Controllala con chat_agente prima di agire o di chiedere qualcosa a ${OWNER}.]`;
+    queuedFrom.delete(p);
+    queuedFrom.set(q, chatId);
+    chatQueue[i] = q;
+  });
+}
+
+/**
+ * Gli avvisi che aspettavano una risposta su questa chat non servono più: li segna «già gestiti» (la pagina li spegne)
+ * e li toglie dalle note per Ciccio. Con `approvalId` solo quello di un permesso o di una domanda (deciso ora);
+ * senza, tutti: l'utente ha scritto direttamente nella chat.
+ */
+function supersede(chatId: string, approvalId?: string) {
+  const closed: NoticeMeta[] = [];
+  for (const m of store.messages(CICCIO_THREAD, 120)) {
+    const n = m.meta;
+    if (n?.kind !== 'notice' || n.chatId !== chatId || n.superseded || n.tone !== 'wait') continue;
+    if (approvalId && n.approvalId !== approvalId) continue;
+    const updated = store.updateMessageMeta(m.id, { ...n, superseded: true });
+    if (updated) bus.emit({ type: 'messageUpdate', message: updated });
+    closed.push(n);
+  }
+  for (let i = pendingNotes.length - 1; i >= 0; i--) {
+    const p = pendingNotes[i];
+    if (p.chatId === chatId && p.wait && (!approvalId || p.approvalId === approvalId)) pendingNotes.splice(i, 1);
+  }
+  if (approvalId) return;
+  annotateQueued(chatId);
+  // Ciccio può aver già letto l'avviso in un giro precedente: ora sa che non vale più.
+  const last = closed[closed.length - 1];
+  if (last) {
+    pendingNotes.push({ chatId, wait: false, line: `- ${last.agentId} · "${last.chatTitle}": ${OWNER} ha già risposto direttamente nella chat, l'avviso di prima non vale più: non chiedergli niente e non scrivere alla chat per quello.` });
+    if (pendingNotes.length > 20) pendingNotes.shift();
+  }
+}
 /** Pausa oltre cui la cache è scaduta (dura un'ora) e conviene una sessione nuova. */
 const CICCIO_IDLE_MS = 60 * 60_000;
 /** Contesto oltre cui Ciccio riparte leggero: ogni chiamata rilegge tutto il contesto. */
@@ -520,10 +604,15 @@ const CICCIO_MAX_CONTEXT = 150_000;
 // Quando una chat di un agente finisce un giro o chiede un permesso, Ciccio lo dice all'utente
 // nella sua chat, a meno che l'utente non stia già guardando quella chat.
 
-function notice(text: string, meta: NoticeMeta) {
-  const m = store.addMessage(CICCIO, 'agent', text, meta);
+/** `at`: quando è successo quello di cui avvisa (un giro finito prima del riassunto): se l'utente scrive subito dopo, la chat è già andata avanti. */
+function notice(text: string, meta: NoticeMeta, at = Date.now()) {
+  // Il riassunto di un giro arriva qualche secondo dopo: se nel frattempo l'utente ha già scritto alla chat, nasce già superato.
+  const stale = meta.tone === 'wait' && store.messagesSince(meta.chatId, 'user', at).length > 0;
+  const m = store.addMessage(CICCIO, 'agent', text, stale ? { ...meta, superseded: true } : meta);
   bus.emit({ type: 'message', message: m });
-  pendingNotes.push(`- ${meta.agentId} · "${meta.chatTitle}": ${text.replace(/\s+/g, ' ').slice(0, 300)}`);
+  markSeen(meta.chatId, at);
+  if (stale) return;
+  pendingNotes.push({ chatId: meta.chatId, approvalId: meta.approvalId, wait: meta.tone === 'wait', line: `- ${meta.agentId} · "${meta.chatTitle}": ${text.replace(/\s+/g, ' ').slice(0, 300)}` });
   if (pendingNotes.length > 20) pendingNotes.shift();
 }
 
@@ -555,13 +644,13 @@ function waitFor(chatId: string, asked: string) {
 }
 
 /** Un giro di Ciccio partito da una chat: false se il tetto orario è pieno (allora resta l'avviso normale). */
-function autoTurn(note: string, prompt: string): boolean {
+function autoTurn(note: string, prompt: string, chatId: string): boolean {
   const now = Date.now();
   autoTurns = autoTurns.filter((t) => now - t < 60 * 60_000);
   if (autoTurns.length >= AUTO_TURNS_PER_HOUR) return false;
   autoTurns.push(now);
   bus.emit({ type: 'message', message: store.addMessage(CICCIO, 'tool', note) });
-  continueCiccio(prompt);
+  continueCiccio(prompt, chatId);
   return true;
 }
 
@@ -577,8 +666,12 @@ function deliverReply(e: { chatId: string; agentId: string; aborted: boolean; er
   const name = agent?.display_name?.trim() || e.agentId;
   const reply = e.error ? `Si è fermato con un errore: ${e.error.split('\n')[0]}`
     : store.messages(e.chatId, 80).filter((m) => m.role === 'agent' && m.ts >= w.at).map((m) => m.text).join('\n\n').slice(-4000);
+  // Il giro è appena finito: da adesso Ciccio ha visto la chat, ma l'utente può averle scritto mentre lavorava.
+  const talked = store.messagesSince(e.chatId, 'user', w.at).length > 0;
+  markSeen(e.chatId);
   return autoTurn(`risposta di ${name} arrivata, la guardo`,
-    `[Risposta di ${name} (chat "${chat?.title ?? ''}") a quello che gli avevi chiesto: «${w.asked}»]\n${reply || '(nessun testo)'}\n\nDecidi tu il passo dopo. Se ${OWNER} deve saperlo, diglielo in una o due frasi.`);
+    `[Risposta di ${name} (chat "${chat?.title ?? ''}") a quello che gli avevi chiesto: «${w.asked}»]\n${reply || '(nessun testo)'}\n\n${talked ? `Nota: nel frattempo ${OWNER} ha scritto direttamente anche lui nella chat, che può essere andata avanti: guardala con chat_agente prima di agire. ` : ''}Decidi tu il passo dopo. Se ${OWNER} deve saperlo, diglielo in una o due frasi.`,
+    e.chatId);
 }
 
 export function startNotices() {
@@ -586,11 +679,16 @@ export function startNotices() {
   agentEvents.onToCiccio((m) => {
     const agent = store.agent(m.agentId);
     const name = agent?.display_name?.trim() || m.agentId;
+    markSeen(m.chatId);
     const ok = autoTurn(`messaggio da ${name}, lo guardo`,
-      `[Messaggio da ${name} (chat "${m.chatTitle}")]\n${m.text.slice(0, 3000)}\n\nSe serve rispondergli usa scrivi_ad_agente su quella chat; se serve una decisione di ${OWNER}, chiedigliela in una frase.`);
+      `[Messaggio da ${name} (chat "${m.chatTitle}")]\n${m.text.slice(0, 3000)}\n\nSe serve rispondergli usa scrivi_ad_agente su quella chat; se serve una decisione di ${OWNER}, chiedigliela in una frase.`,
+      m.chatId);
     if (!ok) notice(plainText(`${name} ti ha scritto, ma Ciccio ha già fatto molti giri automatici in quest'ora: ${m.text}`), { kind: 'notice', agentId: m.agentId, chatId: m.chatId, chatTitle: m.chatTitle, tone: 'wait' });
   });
+  // L'utente scrive direttamente a una chat: gli avvisi che la riguardano e aspettavano una risposta sono superati.
+  agentEvents.onUserWrote((chatId) => supersede(chatId));
   agentEvents.onFinished((e) => {
+    const finishedAt = Date.now();
     // Ciccio aspettava questa risposta: la riceve lui e decide il passo dopo (niente avviso doppio all'utente).
     if (deliverReply(e)) return;
     if (e.aborted || isViewing(e.chatId)) return;
@@ -606,7 +704,7 @@ export function startNotices() {
     const reply = store.messages(e.chatId, 80).filter((m) => m.role === 'agent').slice(-2).map((m) => m.text).join('\n\n');
     if (!reply) return;
     const asks = (chat.last_result ?? '').trim().endsWith('?');
-    void summarize(name, chat.title, reply).then((text) => notice(text, { ...meta, tone: asks ? 'wait' : 'done' }));
+    void summarize(name, chat.title, reply).then((text) => notice(text, { ...meta, tone: asks ? 'wait' : 'done' }, finishedAt));
   });
   // Avvisi che non vengono da un giro (es. una routine saltata per la soglia sull'uso).
   agentEvents.onNotice((n) => {
@@ -617,6 +715,8 @@ export function startNotices() {
     notice(n.text, { kind: 'notice', agentId: n.agentId, chatId: chat.id, chatTitle: chat.title, tone: n.tone });
   });
   bus.on((ev) => {
+    // Permesso o domanda deciso (nella chat, dal telefono, da Ciccio): il suo avviso non aspetta più niente.
+    if (ev.type === 'approval' && ev.approval.status !== 'pending' && ev.approval.chatId !== CICCIO_THREAD) supersede(ev.approval.chatId, ev.approval.id);
     if (ev.type !== 'approval' || ev.approval.status !== 'pending' || ev.approval.chatId === CICCIO_THREAD || isViewing(ev.approval.chatId)) return;
     if (!settings().noticeApprovals) return;
     const chat = store.chat(ev.approval.chatId);
@@ -657,14 +757,26 @@ export function talkToCiccio(text: string, voice = false): 'started' | 'queued' 
 }
 
 /** Un giro di Ciccio senza messaggio nuovo in chat: la ripresa dopo un riavvio o un messaggio rimasto in coda. */
-export function continueCiccio(text: string): 'started' | 'queued' {
-  if (chatState || isDraining()) { chatQueue.push(text); return 'queued'; }
+export function continueCiccio(text: string, fromChat?: string): 'started' | 'queued' {
+  if (chatState || isDraining()) {
+    chatQueue.push(text);
+    if (fromChat) queuedFrom.set(text, fromChat);
+    return 'queued';
+  }
   void chatTurn(text);
   return 'started';
 }
 
+/** Prossimo messaggio in coda (se c'è). */
+function nextQueued(): string | undefined {
+  const next = chatQueue.shift();
+  if (next) queuedFrom.delete(next);
+  return next;
+}
+
 export function stopCiccio(): boolean {
   chatQueue.length = 0;
+  queuedFrom.clear();
   // Richieste riproposte dopo un riavvio: fermando Ciccio non c'è più un giro da riprendere.
   const wasParked = !!staleNote(CICCIO_THREAD);
   if (!chatState) return wasParked;
@@ -733,7 +845,7 @@ async function chatTurn(prompt: string, retry = true, origin: TurnOrigin = fromO
   // I comandi (/compact) vanno così come sono; ai messaggi si aggiungono ora, PC accesi e avvisi dati nel frattempo,
   // così se l'utente risponde "ok, digli di sì" Ciccio sa a cosa. Stanno nel messaggio e non nelle istruzioni:
   // le istruzioni devono restare identiche, o la cache dell'intera conversazione si perde.
-  const notes = command ? [] : pendingNotes.splice(0);
+  const notes = command ? [] : pendingNotes.splice(0).map((n) => n.line);
   const skills = settings().ciccioSkills;
   let failed: string | null = null;
   // Gli errori arrivati come risultato li mostra già handleMessage: qui solo quelli senza risultato.
@@ -778,7 +890,16 @@ async function chatTurn(prompt: string, retry = true, origin: TurnOrigin = fromO
         // mette tutti in ogni richiesta (oltre 600 strumenti, ~400k token a chiamata: era la voce più pesante di
         // Ciccio). Con ToolSearch li carica uno alla volta quando servono, come fanno gli agenti.
         tools: skills ? ['Read', 'Glob', 'Grep', 'WebSearch', 'ToolSearch', ASK_TOOL, 'Skill'] : ['Read', 'Glob', 'Grep', 'WebSearch', 'ToolSearch', ASK_TOOL],
-        mcpServers: { ciccio: ciccioTools, ...pcServers },
+        // Programmi e domini nuovi sul server: come per gli agenti, la card la apre lo strumento e la approva solo l'utente.
+        mcpServers: {
+          ciccio: ciccioTools,
+          [SYSTEM_SERVER]: systemServer({
+            ask: (tool, input, reason) => askApproval(CICCIO, state, tool, input, reason, state.abort.signal).then((r) => r.behavior === 'allow'),
+            note: (t) => bus.emit({ type: 'message', message: store.addMessage(CICCIO, 'tool', t) }),
+            who: 'Ciccio',
+          }, state.abort.signal),
+          ...pcServers,
+        },
         settingSources: skills ? ['user'] : [],
         settings: { autoCompactEnabled: settings().autoCompact, ...(settings().autoCompactWindow ? { autoCompactWindow: settings().autoCompactWindow } : {}), crossSessionInbound: 'refuse' },
         systemPrompt: { type: 'custom', prompt: `${chatSystem()}\n\nPC di ${OWNER} e loro strumenti vanno e vengono: la riga «[Adesso: …]» all'inizio di un messaggio dice cosa c'è in quel momento.`, snapshot: true },
@@ -786,6 +907,8 @@ async function chatTurn(prompt: string, retry = true, origin: TurnOrigin = fromO
         canUseTool: async (toolName, input, opts) => {
           // Domande a scelte: la finestra sopra il campo di testo, la risposta torna a Ciccio.
           if (toolName === ASK_TOOL) return askQuestion(CICCIO, state, input, opts.signal, opts.toolUseID);
+          // Installare programmi e aprire domini: la card la apre lo strumento stesso, dopo i suoi controlli (systemPackages.ts).
+          if (toolName === INSTALL_TOOL || toolName === INSTALL_URL_TOOL || toolName === EGRESS_TOOL) return { behavior: 'allow' };
           if (toolName.startsWith('mcp__ciccio__')) {
             const why = ciccioNeedsOk(toolName.slice('mcp__ciccio__'.length), input);
             return why ? askApproval(CICCIO, state, toolName, input, why, opts.signal, opts.toolUseID) : { behavior: 'allow' };
@@ -845,7 +968,7 @@ async function chatTurn(prompt: string, retry = true, origin: TurnOrigin = fromO
         settle();
         early = true;
         if (!state.abort.signal.aborted) setRestartStreak(CICCIO_THREAD, 0);
-        const next = isDraining() ? undefined : chatQueue.shift();
+        const next = isDraining() ? undefined : nextQueued();
         if (next) void chatTurn(next);
       }
     }
@@ -864,6 +987,6 @@ async function chatTurn(prompt: string, retry = true, origin: TurnOrigin = fromO
       bus.emit({ type: 'message', message: m });
     }
   }
-  const next = isDraining() ? undefined : chatQueue.shift();
+  const next = isDraining() ? undefined : nextQueued();
   if (next) void chatTurn(next);
 }

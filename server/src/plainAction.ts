@@ -16,6 +16,7 @@ export function plainAction(tool: string, input: Record<string, unknown>): strin
   if (tool === 'SSH') return 'usare le tue chiavi SSH';
   if (tool.endsWith('__usa_credenziale')) return 'usare un segreto di 1Password';
   if (tool.endsWith('__installa_programma')) return `installare ${str(input.pacchetto) || 'un programma'}`;
+  if (tool.endsWith('__installa_da_url')) return `installare ${str(input.nome) || 'un programma'} scaricandolo da internet`;
   if (tool.endsWith('__consenti_dominio')) return `raggiungere il sito ${str(input.dominio) || 'nuovo'}`;
   const pc = /^mcp__pc_([^_]+)__([^_]+)_(.+)$/.exec(tool);
   if (pc) { const app = words(pc[2]); return `usare ${app.charAt(0).toUpperCase()}${app.slice(1)} sul PC «${pc[1]}» (${short(words(pc[3]), 40)})`; }

@@ -346,7 +346,7 @@ const WHY: Record<string, string> = {
   linger: 'Ciccio gira come servizio del tuo utente: con linger parte all\'accensione del server anche senza nessuno collegato.',
   sandbox: 'I comandi degli agenti girano in una sandbox (bubblewrap): scrivono solo nel repo del progetto. socat serve per SSH attraverso il proxy.',
   firewall: 'Gli agenti escono su internet solo da un proxy con l\'elenco dei domini consentiti; ufw blocca tutto il resto.',
-  helper: 'Tre piccoli comandi root che Ciccio può lanciare senza password, ognuno per una cosa sola e con i suoi controlli: aprire un dominio, installare un pacchetto ufficiale, aprire SSH verso un server.',
+  helper: 'Quattro piccoli comandi root che Ciccio può lanciare senza password, ognuno per una cosa sola e con i suoi controlli: aprire un dominio, installare un pacchetto ufficiale, installare un programma scaricato (AppImage o archivio), aprire SSH verso un server.',
   github: 'Con gh collegato Ciccio crea i repo dei progetti nuovi e importa quelli esistenti; git usa le stesse credenziali.',
   git: 'Gli agenti fanno commit con questo nome ed email.',
   passkey: 'Si entra in Ciccio solo con una passkey, da qualunque rete.',

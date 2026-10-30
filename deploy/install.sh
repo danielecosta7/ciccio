@@ -269,6 +269,7 @@ stale=()
 differs() { [[ -f "$1" && -f "$2" ]] && [[ "$(sha256sum < "$1")" != "$(sha256sum < "$2")" ]] && stale+=("$2"); return 0; }
 differs deploy/ciccio-egress-allow.sh /usr/local/sbin/ciccio-egress-allow
 differs deploy/ciccio-apt-install.sh /usr/local/sbin/ciccio-apt-install
+differs deploy/ciccio-app-install.sh /usr/local/sbin/ciccio-app-install
 differs deploy/ciccio-ssh-allow.sh /usr/local/sbin/ciccio-ssh-allow
 for f in "$LIB"/*.sh; do [[ -f "$f" ]] && differs "deploy/$(basename "$f")" "$f"; done
 if (( ${#stale[@]} )); then

@@ -10,7 +10,7 @@ import { ChatContainerContent, ChatContainerRoot, ScrollButton } from './chat/Ch
 import { Markdown } from './chat/Markdown';
 import { CopyButton } from './chat/CopyButton';
 import { copyText } from './chat/fileActions';
-import { listEnter, listIndent } from './listContinue';
+import { listEnter, listIndent, outgoing } from './listContinue';
 import { autoGrow } from './autoGrow';
 import { AttachmentChips, SentAttachments, pastedFiles, useAttachments } from './chat/attachments';
 import { useFileDrop } from './chat/FileUpload';
@@ -186,7 +186,7 @@ export function AgentPanel(props: {
   const canSend = !files.uploading && (draft.trim().length > 0 || files.ready.length > 0);
 
   const send = async (text: string) => {
-    const t = text.trim();
+    const t = outgoing(text);
     const atts = files.ready;
     if (files.uploading || (!t && !atts.length)) return;
     setDraft('');

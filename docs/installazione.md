@@ -57,7 +57,7 @@ Per chi preferisce fare da sé, nell'ordine (dettagli in [docs/tecnico.md](tecni
 
 1. Come root: un utente senza sudo; `apt-get install git gh bubblewrap socat curl ca-certificates xz-utils build-essential python3 python3-venv ufw`; su Ubuntu 24.04 il profilo AppArmor per bubblewrap ([documentazione della sandbox](https://code.claude.com/docs/en/sandboxing)); Node 24 in `~utente/.local/node`; Tailscale collegato, con MagicDNS e HTTPS attivi nella console; `tailscale serve --bg --https=443 http://127.0.0.1:8787`; `loginctl enable-linger <utente>`.
 2. Come l'utente: `git clone https://github.com/danielecosta7/ciccio ~/ciccio && cd ~/ciccio && CICCIO_OWNER_NAME=Giulia bash deploy/install.sh`. Scrive `~/.config/ciccio.env` commentato. Poi il login di claude.ai con il programma di Claude Code che arriva con l'SDK (`node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-linux-*/…/claude auth login --claudeai`, il percorso esatto è in Configurazione), `systemctl --user restart ciccio`, `gh auth login` e `bash deploy/install.sh code` per il codice di attivazione.
-3. Facoltativi, come root: copia gli script di root in `/usr/local/lib/ciccio` (`setup.sh --step copia-root`) e da lì `egress-firewall.sh`, `egress-helper.sh`, `apt-helper.sh`, `ssh-helper.sh`; la voce con `setup.sh --step voce`.
+3. Facoltativi, come root: copia gli script di root in `/usr/local/lib/ciccio` (`setup.sh --step copia-root`) e da lì `egress-firewall.sh`, `egress-helper.sh`, `apt-helper.sh`, `app-helper.sh`, `ssh-helper.sh`; la voce con `setup.sh --step voce`.
 
 ### Aggiornare
 

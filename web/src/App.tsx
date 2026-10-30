@@ -23,6 +23,7 @@ import { healViewport, useBand, useKeyboard } from './viewport';
 import { PullIndicator, TAB_PATH, TabBar, type Tab } from './TabBar';
 import { usePullToRefresh } from './gestures';
 import { ProjectNav } from './chat/ProjectNav';
+import { outgoing } from './listContinue';
 
 type Filter = 'all' | AgentStatus;
 const FILTERS: { key: Filter; label: string }[] = [
@@ -190,7 +191,7 @@ export function App() {
 
 
   async function ask(text: string) {
-    const t = text.trim();
+    const t = outgoing(text);
     if (!t) return;
     setDraft('');
     setBusy(true);

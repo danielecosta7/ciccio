@@ -172,13 +172,16 @@ export function Transcript(props: {
   function renderMessage(m: ChatMessage) {
         if (m.meta?.kind === 'notice') {
           const n = m.meta;
-          const color = n.tone === 'wait' ? 'text-wait' : n.tone === 'block' ? 'text-block' : 'text-done';
+          // Risposta già data direttamente nella chat: l'avviso non aspetta più niente.
+          const settled = n.superseded === true;
+          const color = settled ? 'text-muted' : n.tone === 'wait' ? 'text-wait' : n.tone === 'block' ? 'text-block' : 'text-done';
           return (
-            <div key={m.id} className="cc-in flex flex-col gap-1.5 rounded-[10px] border border-line bg-panel-hi px-3 py-2.5">
+            <div key={m.id} className={`cc-in flex flex-col gap-1.5 rounded-[10px] border border-line bg-panel-hi px-3 py-2.5 ${settled ? 'opacity-60' : ''}`}>
               <div className="flex items-center gap-2 text-[12px]">
-                <span className={`h-2 w-2 flex-none ${n.tone === 'wait' ? 'cc-sq-pulse bg-wait' : n.tone === 'block' ? 'bg-block' : 'bg-done'}`} />
+                <span className={`h-2 w-2 flex-none ${settled ? 'bg-muted' : n.tone === 'wait' ? 'cc-sq-pulse bg-wait' : n.tone === 'block' ? 'bg-block' : 'bg-done'}`} />
                 <span className={`font-semibold ${color}`}>{n.agentId}</span>
                 <span className="min-w-0 truncate text-muted">· {n.chatTitle}</span>
+                {settled && <span className="ml-auto flex-none text-muted">già gestita in chat</span>}
               </div>
               <div className="text-[14px] leading-relaxed text-soft">{m.text}</div>
               {props.onOpenChat && (

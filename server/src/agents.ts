@@ -17,7 +17,7 @@ import { openChatSshBridge } from './sshBridge.js';
 import { chatDir, createChatWorktree, removeChatWorktree } from './worktrees.js';
 import { ORCHESTRATOR_SERVER, TO_CICCIO_TOOL, orchestratorServer } from './orchestrator.js';
 import { CREDENTIAL_TOOL, CREDENTIALS_SERVER, credentialProblem, credentialsServer } from './credentials.js';
-import { EGRESS_TOOL, INSTALL_TOOL, SYSTEM_SERVER, systemServer } from './systemPackages.js';
+import { EGRESS_TOOL, INSTALL_TOOL, INSTALL_URL_TOOL, SYSTEM_SERVER, systemServer } from './systemPackages.js';
 import { PROPOSALS, PROPOSE_COMMAND, PROPOSE_MCP, ROUTINE_TOOL, TOOLS_SERVER, projectMcpServers, projectToolHints, projectToolsServer } from './projectTools.js';
 import { subagentModelHook } from './subagents.js';
 import { agentSandbox, confine, confineHook, confineNetwork, memoryDir, noProxyWithSshHosts, prepareProjectDirs, projectEnv, repoSlug, sandboxGitEnv, sessionLockdown, type Scope } from './confine.js';
@@ -83,7 +83,7 @@ export const SSH_TOOL = 'SSH';
  * Permessi che solo l'utente può dare, mai da Ciccio e mai come regola «consenti sempre» del progetto.
  * Le proposte di strumenti hanno solo «Consenti sempre», che però salva lo strumento, non una regola.
  */
-export const ONLY_OWNER = new Set([CREDENTIAL_TOOL, SSH_TOOL, INSTALL_TOOL, EGRESS_TOOL, PROPOSE_COMMAND, PROPOSE_MCP, ROUTINE_TOOL]);
+export const ONLY_OWNER = new Set([CREDENTIAL_TOOL, SSH_TOOL, INSTALL_TOOL, INSTALL_URL_TOOL, EGRESS_TOOL, PROPOSE_COMMAND, PROPOSE_MCP, ROUTINE_TOOL]);
 /** Firma SSH approvata: fino a quando vale, per chat. */
 const sshUntil = new Map<string, number>();
 const SSH_WINDOW_MS = 15 * 60_000;
@@ -216,6 +216,11 @@ function summarizeTool(tool: string, input: Record<string, unknown>): string {
   }
   if (tool === SSH_TOOL) return `${tool}: ${String(input.descrizione ?? '')}`;
   if (tool === INSTALL_TOOL) return `${tool}: installare ${String(input.pacchetto ?? '')} — ${clip(String(input.motivo ?? ''), 600)}`;
+  if (tool === INSTALL_URL_TOOL) {
+    const cmds = Array.isArray(input.comandi) && input.comandi.length ? `\n— comandi: ${(input.comandi as string[]).join(', ')}` : '';
+    const sha = typeof input.sha256 === 'string' && input.sha256 ? `\n— sha256 atteso: ${input.sha256}` : '';
+    return `${tool}: installare «${String(input.nome ?? '')}» (${String(input.tipo ?? '')}) da ${clip(String(input.url ?? ''), 520)}${input.sostituisce ? '\n— sostituisce la versione già installata' : ''}${cmds}${sha}\n— motivo: ${clip(String(input.motivo ?? ''), 600)}`;
+  }
   if (tool === EGRESS_TOOL) return `${tool}: aprire ${String(input.dominio ?? '')}${input.sottodomini ? ' e tutti i sottodomini' : ''} — ${clip(String(input.motivo ?? ''), 600)}`;
   // Proposte di strumenti e routine: il riepilogo con il comando esatto lo prepara projectTools.ts.
   if (PROPOSALS.has(tool) || tool === ROUTINE_TOOL) return `${tool}: ${clip(String(input.riepilogo ?? ''), 4000)}`;
@@ -244,6 +249,7 @@ function toolTarget(tool: string, input: Record<string, unknown>, repoDir: strin
   if (tool === 'Bash') return str('command').split('\n')[0].slice(0, 240);
   if (tool === ASK_TOOL) return questionsOf({ tool, input })?.map((q) => q.question).join(' · ').slice(0, 240) ?? 'domanda';
   if (tool === INSTALL_TOOL) return str('pacchetto');
+  if (tool === INSTALL_URL_TOOL) return str('nome');
   if (tool === EGRESS_TOOL) return str('dominio');
   if (PROPOSALS.has(tool) || tool === ROUTINE_TOOL) return str('nome');
   return (str('pattern') || str('url') || str('query') || str('description') || JSON.stringify(input)).slice(0, 240);
@@ -443,6 +449,8 @@ export function sendToChat(chatId: string, userText: string, from: MessageRole =
   dropTail(chatId);
   setSuggestion(chatId, null);
   say(threadOf(chat), from, userText, attachments.length || routine ? { kind: 'user', attachments, ...(routine ? { routine: routine.name } : {}) } : undefined);
+  // Scritto da lui, non da Ciccio: gli avvisi di Ciccio su questa chat (domande, permessi) sono vecchi da adesso.
+  if (from === 'user') agentEvents.userWrote(chatId);
   autoTitle(chat, userText);
   // Gli allegati sono file nel repo: l'agente li legge con Read (testo, codice, immagini, PDF).
   // Le chat con un worktree lavorano altrove: gli allegati (caricati nel repo) si danno con il percorso completo.
@@ -756,7 +764,7 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
     // Messaggio a Ciccio: sempre consentito (non tocca niente fuori, lo legge solo l'orchestratore).
     if (toolName === TO_CICCIO_TOOL) return { behavior: 'allow' };
     // Programmi di sistema: la card la apre lo strumento stesso, sempre, dopo aver controllato il pacchetto (systemPackages.ts).
-    if (toolName === INSTALL_TOOL || toolName === EGRESS_TOOL) return { behavior: 'allow' };
+    if (toolName === INSTALL_TOOL || toolName === INSTALL_URL_TOOL || toolName === EGRESS_TOOL) return { behavior: 'allow' };
     // Proposte di strumenti e routine: anche qui la card la apre lo strumento, dopo i suoi controlli (projectTools.ts).
     if (PROPOSALS.has(toolName) || toolName === ROUTINE_TOOL) return { behavior: 'allow' };
     // Solo il proprio repo, in ogni livello (anche "Salta permessi"): altri progetti, altri repo e indirizzi interni no.
@@ -835,7 +843,7 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
   rules.push(`- PC di ${OWNER} e chiavi SSH vanno e vengono: la riga «[Adesso: …]» all\'inizio di un messaggio dice cosa c\'è in quel momento e vale più di quello che sapevi prima.`);
   rules.push(`- SSH: ssh, scp, rsync e git usano le chiavi SSH di ${OWNER} in 1Password, che arrivano dal suo Mac o PC Windows solo quando è acceso con il companion. La prima firma la approva ${OWNER} in Ciccio e vale 15 minuti; poi conferma sul PC (una finestra con utente e server, poi Touch ID o Windows Hello). Il PC firma solo accessi SSH: firme di commit o di altri dati con queste chiavi non passano. Se la firma fallisce («agent refused operation», «signing failed»), ${OWNER} non ha ancora approvato: diglielo in chat e rilancia il comando dopo il suo ok, non insistere in background. Raggiungi solo i server nell'elenco SSH di Ciccio: se un host non risponde, chiedi a ${OWNER} di aggiungerlo. Non creare né copiare chiavi private.`);
   rules.push(`- Server SSH interni (192.168.x.x, 10.x.x.x, nomi della rete dell'ufficio): li raggiungi solo se ${OWNER} ha impostato un ponte attraverso un suo PC in Configurazione › Server SSH; ssh lo usa da solo. Se non c'è, chiedilo a ${OWNER}, non cercare altre strade.`);
-  rules.push(`- Se ti manca un programma di sistema (es. openscad, imagemagick), chiedilo con lo strumento installa_programma: solo pacchetti ufficiali di Ubuntu, lo approva ${OWNER} ogni volta. Non provare sudo o apt. Una volta installato, i comandi che lo usano seguono il livello di autorizzazione della chat come gli altri. Se il proxy blocca un sito che ti serve (403 o 502 dal proxy, «Proxying refused»), chiedi quel dominio con consenti_dominio.`);
+  rules.push(`- Se ti manca un programma di sistema (es. openscad, imagemagick), chiedilo con lo strumento installa_programma: solo pacchetti ufficiali di Ubuntu, lo approva ${OWNER} ogni volta. Se il programma non è nei repository di Ubuntu (es. FreeCAD, che esce come AppImage), usa installa_da_url con l'indirizzo https diretto della AppImage o dell'archivio ufficiale: ${OWNER} vede indirizzo, nome e comandi e approva ogni volta. Non provare sudo o apt. Una volta installato, i comandi che lo usano seguono il livello di autorizzazione della chat come gli altri. Se il proxy blocca un sito che ti serve (403 o 502 dal proxy, «Proxying refused»), chiedi quel dominio con consenti_dominio.`);
   rules.push(`- Se ti serve uno strumento che non hai e che userai più volte (un programma o uno script del server con parametri fissi, o un server MCP), proponilo con proponi_comando o proponi_server_mcp (server ciccio_strumenti, li trovi con ToolSearch): ${OWNER} vede il comando esatto e, se lo consente, resta al progetto per tutte le chat. Per un lavoro da ripetere a orari fissi proponi una routine con crea_routine.`);
   rules.push(`- Password, chiavi API e altri segreti: non chiederli mai a ${OWNER} in chat e non scriverli nei file. Usa lo strumento usa_credenziale con il riferimento di 1Password (op://vault/elemento/campo); se non lo conosci, chiedi a ${OWNER} il riferimento, non il valore.`);
   const sshPc = onePasswordAvailable('sshAgent');
