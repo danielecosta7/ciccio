@@ -469,6 +469,8 @@ Gli agenti usano le chiavi SSH di 1Password (ssh, scp, git) e leggono segreti `o
 }
 ```
 
+**Sul Mac le firme SSH passano dalla CLI `op`** (`companion/src/opssh.ts`), quando è installata. Dalla 8.12.42 di 1Password per Mac l'agent SSH non mostra più la richiesta di approvazione alle app con la sola firma ad-hoc, come il companion: la firma resta in attesa e dopo 60 secondi 1Password chiude senza rispondere né scriverlo nell'attività («agent refused operation» per l'agente). La richiesta della CLI invece compare. Dopo la finestra del PC il companion cerca tra gli elementi «chiave SSH» quello con la chiave pubblica della richiesta (ricordato in memoria), legge la privata con `op read …/private_key` (1Password chiede l'approvazione), controlla che sia proprio quella chiave, firma (ed25519, RSA con sha2-256/512, ECDSA) e risponde a Ciccio come l'agent; la chiave non va su disco e il buffer letto si azzera subito. Il compromesso: con l'agent la privata non esce mai da 1Password, così passa per un istante nella memoria del companion. L'elenco delle chiavi resta all'agent; senza `op` si prova l'agent. Su Windows non cambia niente. Prove in `companion/test/firme.ts`.
+
 ### Ponti SSH: i server della rete di un PC
 
 Il server di Ciccio (un VPS) non vede la rete dell'ufficio: un agente non può fare `ssh utente@192.168.1.50`. Il PC dell'ufficio con il companion sì, e fa da ponte: apre lui la connessione TCP e Ciccio ci fa passare i byte di ssh sulla WebSocket del companion. Le chiavi restano dove sono: la firma passa sempre da 1Password con i suoi consensi (Ciccio, finestra del PC, Touch ID o Windows Hello).

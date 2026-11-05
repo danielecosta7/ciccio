@@ -3,7 +3,8 @@ import WebSocket from 'ws';
 import { COMPANION_PATH, COMPANION_PROTOCOL, SECRET_READ_METHOD, SSH_AGENT_METHOD, SSH_BRIDGE_CLOSE, SSH_BRIDGE_DATA, SSH_BRIDGE_ID, SSH_BRIDGE_MAX, SSH_BRIDGE_OPEN, SSH_BRIDGE_PROPOSE, SSH_BRIDGE_REMOVE, SSH_BRIDGES_CHANGED, type CallParams, type HelloParams, type NotifyParams, type RpcId, type UpdateParams } from '../../shared/companion.js';
 import { BridgeTable } from '../../shared/node/ponte.js';
 import { PcBridges } from './ponte.js';
-import { onePasswordFeatures, readSecret, sshAgentRequest } from './onepassword.js';
+import { findOp, onePasswordFeatures, readSecret, sshAgentRequest } from './onepassword.js';
+import { opSshSign } from './opssh.js';
 import { OnePasswordGuard } from './consensi.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -220,8 +221,11 @@ export class CiccioLink {
           const bind = typeof p.bind === 'string' ? Buffer.from(p.bind, 'base64') : null;
           log(`→ 1Password · firma SSH per ${await this.guard.approveSsh(req, bind, ctrl.signal)}`);
         }
-        const res = await sshAgentRequest(req, ctrl.signal);
-        if (signing) log(`← 1Password · firma SSH ${res[4] === 14 ? green('ok') : red('rifiutata')}`);
+        // Mac: le firme con la CLI op, perché l'agent SSH di 1Password non chiede più l'approvazione alle app come
+        // il companion (opssh.ts). Senza op si prova comunque l'agent.
+        const bin = signing && process.platform === 'darwin' ? findOp() : null;
+        const res = bin ? await opSshSign(bin, req, ctrl.signal) : await sshAgentRequest(req, ctrl.signal);
+        if (signing) log(`← 1Password · firma SSH ${res[4] === 14 ? green('ok') : red('rifiutata')}${bin ? dim(' (con la CLI op)') : ''}`);
         this.send({ jsonrpc: '2.0', id, result: { message: res.toString('base64') } });
       } else {
         const ref = typeof p.ref === 'string' ? p.ref : '';

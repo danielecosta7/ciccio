@@ -25,7 +25,8 @@ export function NewProjectDialog(props: { open: boolean; mode?: 'new' | 'github'
 
   useEffect(() => {
     if (!props.open) return;
-    setName(''); setDescription(''); setMessage(''); setError(''); setBusy(false); setPick(null); setQ('');
+    // L'elenco dei repo si richiede a ogni apertura: uno vecchio nasconderebbe i repo nuovi o appena condivisi.
+    setName(''); setDescription(''); setMessage(''); setError(''); setBusy(false); setPick(null); setQ(''); setRepos(null);
     setTab(props.mode ?? 'new');
     requestAnimationFrame(() => first.current?.focus());
   }, [props.open, props.mode]);
@@ -111,7 +112,7 @@ export function NewProjectDialog(props: { open: boolean; mode?: 'new' | 'github'
                       {r.description && <span className="cc-wrap line-clamp-1 text-[12px] text-muted">{r.description}</span>}
                     </button>
                   ))}
-                  {repos?.length === 0 && !error && <span className="cc-in py-3 text-[13px] text-muted">Tutti i tuoi repo sono già in Ciccio.</span>}
+                  {repos?.length === 0 && !error && <span className="cc-in py-3 text-[13px] text-muted">Tutti i repo che vedi su GitHub sono già in Ciccio.</span>}
                 </div>
               </div>
             )}

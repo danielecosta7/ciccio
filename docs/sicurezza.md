@@ -9,6 +9,7 @@ Ciccio fa eseguire comandi sul tuo server a degli agenti: trattalo come un acces
 - Il login (passkey) serve sempre, anche dalla tailnet; app desktop e companion entrano con il loro token, preso una volta con un codice.
 - Ogni agente lavora solo nel suo repo, con la sandbox anche in «Salta permessi»; i limiti sono descritti in [docs/tecnico.md](tecnico.md#ogni-agente-solo-sul-suo-repo), compresi quelli che sono controlli sui comandi e non barriere vere.
 - Un comando scritto apposta, dentro la sandbox, può leggere il token di gh. `setup.sh` collega GitHub con `gh auth login --web`, che vale per tutti i tuoi repo: per limitare il danno dai a gh un token fine-grained solo sui repo dei progetti (`gh auth login --with-token`, come l'utente di Ciccio). Con un token così, i repo dei progetti nuovi su GitHub li crei tu.
+- Sul Mac le firme SSH passano dalla CLI `op` di 1Password: la chiave privata entra per un istante nella memoria del companion, che firma e la scarta (su Windows resta nell'agent SSH di 1Password). Il perché è in [tecnico.md](tecnico.md#1password-chiavi-ssh-e-segreti-con-il-consenso-del-pc).
 - I PC non si fidano del server: companion e app installano solo aggiornamenti firmati, e ogni segreto di 1Password o firma SSH chiesti da Ciccio si confermano anche in una finestra sul PC, con il riferimento o il server esatti.
 - Limiti noti e come segnalare una vulnerabilità: [SECURITY.md](../SECURITY.md).
 

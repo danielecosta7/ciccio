@@ -28,7 +28,7 @@ const exists = (p: string) => {
 };
 
 /** La CLI op: nei posti dove la mettono Homebrew, l'installer e winget (l'app parte senza il PATH della shell). */
-function findOp(): string | null {
+export function findOp(): string | null {
   const candidates = process.platform === 'win32'
     ? [
         path.join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'WinGet', 'Links', 'op.exe'),

@@ -11,7 +11,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign, verify, type KeyObject } from 'node:crypto';
+import { signRequest, sshPublicBlob } from '../src/opssh.js';
 import { checkSignedFile, openManifest, publicKeyFromBase64, releaseKeys, signedBy } from '../../shared/node/release.js';
 import { RELEASE_PUBLIC_KEYS } from '../../shared/release-key.js';
 import { OnePasswordGuard, parseSshSign, sshTarget } from '../src/consensi.js';
@@ -178,6 +179,36 @@ const slow = new OnePasswordGuard(null, (_req, signal) => new Promise((r) => sig
 const ctrl = new AbortController();
 setTimeout(() => ctrl.abort(), 200);
 await rejects(slow.approveSecret('op://Lavoro/Lento/password', undefined, ctrl.signal), /annullata/, 'richiesta annullata: la finestra si chiude');
+
+// ── Firme con la chiave letta da op (Mac, opssh.ts) ───────────────────────
+// La risposta deve essere quella di un agent vero: tipo 14, poi la firma nel formato SSH del suo algoritmo.
+{
+  const be = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+  const s = (b: Buffer | string) => { const v = Buffer.from(b); return Buffer.concat([be(v.length), v]); };
+  const request = (blob: Buffer, data: Buffer, flags: number) => { const body = Buffer.concat([Buffer.from([13]), s(blob), s(data), be(flags)]); return Buffer.concat([be(body.length), body]); };
+  const read = (b: Buffer, at: number): [Buffer, number] => [b.subarray(at + 4, at + 4 + b.readUInt32BE(at)), at + 4 + b.readUInt32BE(at)];
+  const data = Buffer.from('dati della sessione da firmare');
+  const pairs: [string, { publicKey: KeyObject; privateKey: KeyObject }, number, string, (sig: Buffer, pub: KeyObject) => boolean][] = [
+    ['ed25519', generateKeyPairSync('ed25519'), 0, 'ssh-ed25519', (sig, pub) => verify(null, data, pub, sig)],
+    ['RSA con rsa-sha2-256', generateKeyPairSync('rsa', { modulusLength: 2048 }), 2, 'rsa-sha2-256', (sig, pub) => verify('sha256', data, pub, sig)],
+    ['RSA con rsa-sha2-512', generateKeyPairSync('rsa', { modulusLength: 2048 }), 4, 'rsa-sha2-512', (sig, pub) => verify('sha512', data, pub, sig)],
+    ['ECDSA P-256', generateKeyPairSync('ec', { namedCurve: 'P-256' }), 0, 'ecdsa-sha2-nistp256', (sig, pub) => {
+      // mpint r e mpint s → r||s di 32 byte ciascuno, come vuole verify con ieee-p1363.
+      const [r, a] = read(sig, 0); const [t] = read(sig, a);
+      const fix = (x: Buffer) => Buffer.concat([Buffer.alloc(32), x]).subarray(-32);
+      return verify('sha256', data, { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.concat([fix(r), fix(t)]));
+    }],
+  ];
+  for (const [name, kp, flags, alg, check] of pairs) {
+    const res = signRequest(request(sshPublicBlob(kp.publicKey), data, flags), kp.privateKey);
+    const [blob] = read(res, 5);
+    const [a, at] = read(blob, 0);
+    const [sig] = read(blob, at);
+    ok(res[4] === 14 && res.readUInt32BE(0) === res.length - 4 && a.toString() === alg && check(sig, kp.publicKey), `firma con op: ${name} valida (${alg})`);
+  }
+  const altra = generateKeyPairSync('ed25519');
+  throws(() => signRequest(request(sshPublicBlob(altra.publicKey), data, 0), generateKeyPairSync('ed25519').privateKey), /non è quella della richiesta/, 'firma con op: chiave diversa da quella chiesta, rifiutata');
+}
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(failed ? '\nPROVA FALLITA' : '\nPROVA RIUSCITA');

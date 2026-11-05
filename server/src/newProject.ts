@@ -102,13 +102,20 @@ export async function createProject(opts: { name: string; description?: string; 
   return { agentId: name, chatId: chat.id, url: url.replace(/\.git$/, '') };
 }
 
-/** Repo GitHub dell'utente non ancora tra i progetti di Ciccio (per aggiungerne uno esistente). */
+/**
+ * Repo GitHub visibili all'utente non ancora tra i progetti di Ciccio (per aggiungerne uno esistente): i suoi, quelli
+ * in cui è collaboratore e quelli delle sue organizzazioni (`gh repo list` darebbe solo i suoi). I suoi col solo nome,
+ * gli altri come owner/nome, che è quello che importProject vuole per clonarli.
+ */
 export async function githubRepos(): Promise<{ name: string; description: string; private: boolean; updatedAt: string; archived: boolean }[]> {
-  const { stdout } = await run('gh', ['repo', 'list', '--limit', '300', '--json', 'name,description,isPrivate,updatedAt,isArchived'], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+  const login = (await ghLogin()).toLowerCase();
+  const { stdout } = await run('gh', ['api', '--paginate', 'user/repos?affiliation=owner,collaborator,organization_member&per_page=100',
+    '--jq', '.[] | {full_name, name, description, private, updated_at, archived, owner: .owner.login}'], { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
   const have = new Set(fs.existsSync(config.projectsDir) ? fs.readdirSync(config.projectsDir) : []);
-  return (JSON.parse(stdout) as { name: string; description: string | null; isPrivate: boolean; updatedAt: string; isArchived: boolean }[])
+  return stdout.split('\n').filter(Boolean)
+    .map((l) => JSON.parse(l) as { full_name: string; name: string; description: string | null; private: boolean; updated_at: string; archived: boolean; owner: string })
     .filter((r) => !have.has(r.name))
-    .map((r) => ({ name: r.name, description: r.description ?? '', private: r.isPrivate, updatedAt: r.updatedAt, archived: r.isArchived }))
+    .map((r) => ({ name: r.owner.toLowerCase() === login ? r.name : r.full_name, description: r.description ?? '', private: r.private, updatedAt: r.updated_at, archived: r.archived }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
