@@ -34,6 +34,7 @@ import { projectToolViews, removeProjectTool } from './projectTools.js';
 import { createRoutine, fireRoutine, removeRoutine, routineRuns, routineViews, startRoutines, updateRoutine } from './routines.js';
 import { activityNow, resumeAfterRestart, shutdown } from './restart.js';
 import { CICCIO_THREAD, EFFORTS, MODELS, PERMISSION_LEVELS, type AgentInfo, type Attachment, type Effort, type PermissionLevel } from '../../shared/types.js';
+import { workTime } from '../../shared/worktime.js';
 
 // I token dei file per il visore di Office contengono il percorso: parametri più lunghi dei 100 caratteri di Fastify.
 // req.ip (limite ai tentativi di accesso) legge X-Forwarded-For solo dai proxy fidati (config.trustProxy).
@@ -164,6 +165,7 @@ app.get<{ Params: { id: string }; Querystring: { chat?: string } }>('/api/agents
     autoCompactWindow: settings().autoCompactWindow, statusMd: readStatusMd(dir)?.raw ?? null,
     allowRules: allowRules(row.id), mcpServers: mcpServers(row.path),
     connectors: !!row.connectors, mcpStatus: mcpStatus(row.id), pcTools: !!row.pc_tools, tools: projectToolViews(row.id),
+    time: workTime(req.query.chat ? store.workEvents({ chatId: req.query.chat }) : [], store.workEvents({ agentId: row.id })),
   };
   return info;
 });

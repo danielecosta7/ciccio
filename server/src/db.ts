@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { config } from './config.js';
 import type { Approval, ChatMessage, Effort, MessageMeta, MessageRole, PermissionLevel, Recap, RoutineRunStatus } from '../../shared/types.js';
+import type { WorkEvent } from '../../shared/worktime.js';
 
 fs.mkdirSync(config.dataDir, { recursive: true });
 const db = new Database(path.join(config.dataDir, 'ciccio.db'));
@@ -330,6 +331,19 @@ export const store = {
   },
   countMessages(chatId: string, role: MessageRole): number {
     return (db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE chat_id = ? AND role = ?`).get(chatId, role) as { n: number }).n;
+  },
+  /**
+   * Quando sono stati scritti i messaggi di una chat o di tutto un progetto, in ordine, per il conto del tempo.
+   * Solo data e «chi ha aperto il giro» (utente, oppure Ciccio o una routine): il meta si legge solo dai messaggi
+   * che aprono un giro, non da quelli degli strumenti, che hanno output lunghi.
+   */
+  workEvents(scope: { chatId: string } | { agentId: string }): WorkEvent[] {
+    const [where, id] = 'chatId' in scope ? ['chat_id', scope.chatId] : ['agent_id', scope.agentId];
+    const rows = db.prepare(
+      `SELECT ts, role, CASE WHEN role IN ('user', 'ciccio') AND json_valid(meta) THEN json_extract(meta, '$.routine') END AS routine
+       FROM messages WHERE ${where} = ? ORDER BY ts, id`,
+    ).all(id) as { ts: number; role: string; routine: string | null }[];
+    return rows.map((r) => ({ ts: r.ts, start: r.role === 'ciccio' || r.routine ? 'auto' : r.role === 'user' ? 'user' : null }));
   },
   lastMessage(chatId: string, role: MessageRole): ChatMessage | undefined {
     const r = db.prepare(`SELECT ${MSG_COLS} FROM messages WHERE chat_id = ? AND role = ? ORDER BY id DESC LIMIT 1`).get(chatId, role) as Record<string, unknown> | undefined;

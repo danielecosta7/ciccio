@@ -1,5 +1,7 @@
 // Tipi condivisi tra server e web.
 
+import type { WorkTime } from './worktime.js';
+
 export type AgentStatus = 'wait' | 'work' | 'block' | 'stale' | 'idle';
 
 /** Livello di autorizzazione della chat, come in Claude Code. */
@@ -150,6 +152,8 @@ export interface AgentInfo {
   pcTools: boolean;
   /** Strumenti su misura approvati dall'utente (proposti dagli agenti). */
   tools: ProjectToolView[];
+  /** Tempo dedicato alla chat e al progetto, dai messaggi (shared/worktime.ts). */
+  time: WorkTime;
 }
 
 /** Uno strumento su misura del progetto: un comando del server o un server MCP, approvato con «Consenti sempre». */

@@ -5,6 +5,7 @@ import { STATUS, runRing } from '../ui';
 import { quick, smooth } from '../motion';
 import type { AgentView, ChatView } from '../../../shared/types';
 import { byWork, recency } from '../order';
+import { visibleChats } from '../chatLimit';
 import { haptic } from '../haptic';
 import { useCoarse } from '../viewport';
 
@@ -15,7 +16,7 @@ const ACTIONS_W = 148;
  * Chat sul telefono: si apre col tocco; scorrendo verso sinistra (o tenendo premuto) compaiono Rinomina e Archivia.
  * Archiviare non cancella i messaggi.
  */
-function TouchChatRow({ chat, active, onOpen }: { chat: ChatView; active: boolean; onOpen: () => void }) {
+function TouchChatRow({ chat, active, onOpen, delay = 0 }: { chat: ChatView; active: boolean; onOpen: () => void; delay?: number }) {
   const [editing, setEditing] = useState(false);
   const [open, setOpen] = useState(false);
   const press = useRef<{ t: ReturnType<typeof setTimeout>; x: number; y: number; long: boolean } | null>(null);
@@ -26,7 +27,7 @@ function TouchChatRow({ chat, active, onOpen }: { chat: ChatView; active: boolea
   const actionsOpacity = useTransform(x, [-6, 0], [1, 0]);
   return (
     <motion.div layout="position" transition={smooth}
-      initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 44, transition: smooth }} exit={{ opacity: 0, height: 0, transition: quick }}
+      initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 44, transition: { ...smooth, delay } }} exit={{ opacity: 0, height: 0, transition: quick }}
       className="relative flex-none overflow-hidden rounded-[9px]">
       <motion.div className="absolute inset-y-0 right-0 flex" style={{ width: ACTIONS_W, opacity: actionsOpacity }} aria-hidden={!open}>
         <button type="button" tabIndex={open ? 0 : -1} onClick={() => { reveal(false); setEditing(true); }}
@@ -61,9 +62,13 @@ function TouchChatRow({ chat, active, onOpen }: { chat: ChatView; active: boolea
 }
 
 
-function loadOpen(): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem('ciccio.navOpen') ?? '[]') as string[]); } catch { return new Set(); }
+const OPEN_KEY = 'ciccio.navOpen';
+/** Progetti di cui hai chiesto «tutte le chat» (gli altri ne mostrano al massimo CHATS_PER_REPO, più quelle che servono). */
+const ALL_KEY = 'ciccio.navAll';
+function loadSet(key: string): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(key) ?? '[]') as string[]); } catch { return new Set(); }
 }
+const flip = (set: Set<string>, id: string) => { const n = new Set(set); if (n.has(id)) n.delete(id); else n.add(id); return n; };
 
 /** Titolo di una chat modificabile sul posto: doppio clic o matita, Invio salva, Esc annulla. */
 export function ChatTitleEdit({ chat, className = '', onDone }: { chat: ChatView; className?: string; onDone: () => void }) {
@@ -81,13 +86,13 @@ export function ChatTitleEdit({ chat, className = '', onDone }: { chat: ChatView
   );
 }
 
-function ChatRowItem({ chat, active, onOpen }: { chat: ChatView; active: boolean; onOpen: () => void }) {
+function ChatRowItem({ chat, active, onOpen, delay = 0 }: { chat: ChatView; active: boolean; onOpen: () => void; delay?: number }) {
   const [editing, setEditing] = useState(false);
   // Il contorno in movimento dice cosa fa la chat (al lavoro o ti aspetta), anche se non la stai guardando;
   // quella aperta si riconosce dal velo verde (cc-here) e da un bordo fermo.
   return (
     <motion.div layout="position" transition={smooth}
-      initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 36, transition: smooth }} exit={{ opacity: 0, height: 0, transition: quick }}
+      initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 36, transition: { ...smooth, delay } }} exit={{ opacity: 0, height: 0, transition: quick }}
       className={`group relative flex h-9 flex-none items-center overflow-hidden gap-2 rounded-[7px] border pr-1 pl-2.5 ${runRing(chat.status)} ${active ? 'cc-here border-acid/40 bg-panel-hi' : 'border-transparent hover:bg-panel'}`}>
       <span className={`h-1.5 w-1.5 flex-none ${chat.status === 'wait' ? 'cc-sq-pulse' : ''}`} style={{ background: chat.status === 'idle' ? 'oklch(0.45 0 0)' : STATUS[chat.status].color }} />
       {editing ? (
@@ -119,7 +124,39 @@ function ChatRowItem({ chat, active, onOpen }: { chat: ChatView; active: boolean
   );
 }
 
-/** Progetti come in Claude Code per Mac: ognuno si apre a fisarmonica e mostra le sue chat. */
+/**
+ * In fondo alle chat di un progetto: «3 altre chat» le mostra, «Mostra meno» le richiude. Entra ed esce come le righe,
+ * e il numero scorre quando cambia (una chat si mette al lavoro e passa nell'elenco, o ne finisce una e scende).
+ */
+function MoreChats({ hidden, expanded, name, coarse, onToggle }: { hidden: number; expanded: boolean; name: string; coarse: boolean; onToggle: () => void }) {
+  return (
+    // Senza `layout`: sta sempre in fondo, lo spostano già le righe che cambiano altezza.
+    <motion.div
+      initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: coarse ? 44 : 28, transition: smooth }} exit={{ opacity: 0, height: 0, transition: quick }}
+      className="flex-none overflow-hidden">
+      <button type="button" onClick={onToggle} aria-expanded={expanded}
+        className="cc-press flex h-full w-full items-center gap-1.5 rounded-[7px] pr-2 pl-2.5 text-left text-[12px] text-muted hover:bg-panel hover:text-text pointer-coarse:text-[13.5px]">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+          className={`flex-none transition-transform duration-200 motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`}><path d="M6 9l6 6 6-6" /></svg>
+        <span key={expanded ? 'meno' : 'altre'} className="cc-in min-w-0 truncate">
+          {expanded ? 'Mostra meno' : (
+            <>
+              <span className="relative inline-flex overflow-hidden align-bottom tabular-nums">
+                <AnimatePresence mode="popLayout" initial={false}>
+                  <motion.span key={hidden} initial={{ y: 9, opacity: 0 }} animate={{ y: 0, opacity: 1, transition: quick }} exit={{ y: -9, opacity: 0, transition: quick }}>{hidden}</motion.span>
+                </AnimatePresence>
+              </span>
+              {hidden === 1 ? ' altra chat' : ' altre chat'}
+            </>
+          )}
+          <span className="sr-only"> di {name}</span>
+        </span>
+      </button>
+    </motion.div>
+  );
+}
+
+/** Progetti come in Claude Code per Mac: ognuno si apre a fisarmonica e mostra le sue chat (le più recenti, e sempre quelle che servono a te). */
 export function ProjectNav(props: {
   agents: AgentView[];
   /** Progetto e chat aperti (null nella scheda Chat del telefono, che non ha una chat aperta). */
@@ -133,9 +170,11 @@ export function ProjectNav(props: {
 }) {
   const coarse = useCoarse();
   const [q, setQ] = useState('');
-  const [open, setOpen] = useState<Set<string>>(loadOpen);
-  const save = (next: Set<string>) => { setOpen(next); try { localStorage.setItem('ciccio.navOpen', JSON.stringify([...next])); } catch { /* memoria non disponibile */ } };
-  const toggle = (id: string) => { const n = new Set(open); if (n.has(id)) n.delete(id); else n.add(id); save(n); };
+  const [open, setOpen] = useState<Set<string>>(() => loadSet(OPEN_KEY));
+  const [all, setAll] = useState<Set<string>>(() => loadSet(ALL_KEY));
+  const remember = (key: string, next: Set<string>) => { try { localStorage.setItem(key, JSON.stringify([...next])); } catch { /* memoria non disponibile */ } };
+  const toggle = (id: string) => { const n = flip(open, id); setOpen(n); remember(OPEN_KEY, n); };
+  const toggleAll = (id: string) => { const n = flip(all, id); setAll(n); remember(ALL_KEY, n); };
 
   // Il progetto che stai guardando è sempre aperto.
   useEffect(() => {
@@ -167,8 +206,15 @@ export function ProjectNav(props: {
       <div className={props.page ? 'px-2 pb-3' : 'cc-scroll flex-1 overflow-y-auto px-2 pb-3'}>
         <AnimatePresence initial={false}>
         {list.map(({ a, chats }) => {
-          const isOpen = open.has(a.id) || !!q.trim();
+          const searching = !!q.trim();
+          const isOpen = open.has(a.id) || searching;
           const here = a.id === props.currentAgentId;
+          // Chat visibili: cercando si vedono tutte quelle trovate; altrimenti al massimo CHATS_PER_REPO più quelle che servono (chatLimit.ts).
+          const peek = searching ? null : visibleChats(chats, { currentId: props.currentChatId });
+          const expanded = !!peek && all.has(a.id);
+          const shownIds = new Set(peek?.shown.map((c) => c.id));
+          let k = 0;
+          const rows = (peek && !expanded ? peek.shown : chats).map((c) => ({ c, delay: expanded && !shownIds.has(c.id) ? Math.min(k++, 5) * 0.03 : 0 }));
           return (
             <motion.div key={a.id} layout="position" transition={smooth} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: quick }} className="mb-0.5">
               {/* Progetto chiuso: il contorno delle sue chat passa a lui, così non ti sfugge chi lavora o ti aspetta. */}
@@ -190,10 +236,11 @@ export function ProjectNav(props: {
                   <motion.div key="chats" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1, transition: smooth }} exit={{ height: 0, opacity: 0, transition: quick }} className="overflow-hidden">
                     <div className="flex flex-col gap-0.5 py-0.5 pl-4">
                       <AnimatePresence initial={false}>
-                      {chats.map((c) => (coarse
-                        ? <TouchChatRow key={c.id} chat={c} active={c.id === props.currentChatId} onOpen={() => props.onOpenChat(a.id, c.id)} />
-                        : <ChatRowItem key={c.id} chat={c} active={c.id === props.currentChatId} onOpen={() => props.onOpenChat(a.id, c.id)} />
+                      {rows.map(({ c, delay }) => (coarse
+                        ? <TouchChatRow key={c.id} chat={c} delay={delay} active={c.id === props.currentChatId} onOpen={() => props.onOpenChat(a.id, c.id)} />
+                        : <ChatRowItem key={c.id} chat={c} delay={delay} active={c.id === props.currentChatId} onOpen={() => props.onOpenChat(a.id, c.id)} />
                       ))}
+                      {peek && peek.hidden > 0 && <MoreChats key="more" hidden={peek.hidden} expanded={expanded} name={a.name} coarse={coarse} onToggle={() => toggleAll(a.id)} />}
                       </AnimatePresence>
                       {chats.length === 0 && (
                         <button type="button" onClick={() => props.onNewChat(a.id)} className="cc-in rounded-[7px] px-2.5 py-1.5 text-left text-[12.5px] text-muted hover:bg-panel hover:text-text pointer-coarse:min-h-11 pointer-coarse:text-[14px]">+ Inizia una chat</button>

@@ -144,6 +144,13 @@ function Toggle({ on, label, disabled, onChange }: { on: boolean; label: string;
 const k = (n: number) => `${Math.round(n / 1000)}k`;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+/** Durata per il tempo dedicato: «meno di 1 min», «42 min», «3 h 05 min». */
+function duration(ms: number): string {
+  const min = Math.round(ms / 60_000);
+  if (min < 1) return ms > 0 ? 'meno di 1 min' : '0 min';
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+}
+
 function Row({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
   return (
     <div className="flex items-baseline gap-3">
@@ -248,6 +255,20 @@ function ChatTab(props: {
                 </div>
               </div>
             )}
+          </Section>
+
+          <Section id="time" title="Tempo" open={open.has('time')}
+            summary={info ? `${duration(info.time.chatMs)} in questa chat · ${duration(info.time.projectMs)} nel progetto` : undefined}>
+            <dl className="m-0 flex flex-col gap-1.5">
+              <Row label="Questa chat">{info ? duration(info.time.chatMs) : '–'}</Row>
+              <Row label="Progetto">{info ? duration(info.time.projectMs) : '–'}</Row>
+              <Row label="Oggi">{info ? duration(info.time.todayMs) : '–'}</Row>
+              <Row label="7 giorni">{info ? duration(info.time.weekMs) : '–'}</Row>
+            </dl>
+            <p className="m-0 text-[12px] leading-snug text-muted">
+              «Progetto» somma tutte le sue chat, e due chat al lavoro insieme contano una volta; «Oggi» e «7 giorni» sono del progetto.
+              Si conta il tempo attivo: le pause oltre 5 minuti tra un messaggio e l'altro no (come in Impostazioni › Consumi), né i giri partiti da routine o da Ciccio.
+            </p>
           </Section>
 
           <Section id="output" title="Output" open={open.has('output')}

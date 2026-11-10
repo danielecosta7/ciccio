@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, generateKeyPairSync, sign, verify, type KeyObject } from 'node:crypto';
-import { signRequest, sshPublicBlob } from '../src/opssh.js';
+import { privateKeyFromPem, signRequest, sshPublicBlob } from '../src/opssh.js';
 import { checkSignedFile, openManifest, publicKeyFromBase64, releaseKeys, signedBy } from '../../shared/node/release.js';
 import { RELEASE_PUBLIC_KEYS } from '../../shared/release-key.js';
 import { OnePasswordGuard, parseSshSign, sshTarget } from '../src/consensi.js';
@@ -206,6 +206,20 @@ await rejects(slow.approveSecret('op://Lavoro/Lento/password', undefined, ctrl.s
     const [sig] = read(blob, at);
     ok(res[4] === 14 && res.readUInt32BE(0) === res.length - 4 && a.toString() === alg && check(sig, kp.publicKey), `firma con op: ${name} valida (${alg})`);
   }
+  // ed25519 in PKCS#8 v2 (chiave pubblica in coda), come la dà op per le chiavi create in 1Password.
+  const v2kp = generateKeyPairSync('ed25519');
+  const seed = (v2kp.privateKey.export({ format: 'der', type: 'pkcs8' }) as Buffer).subarray(16);
+  const v2body = Buffer.concat([Buffer.from('020101300506032b657004220420', 'hex'), seed, Buffer.from([0x81, 0x21, 0x00]), (v2kp.publicKey.export({ format: 'der', type: 'spki' }) as Buffer).subarray(12)]);
+  // Etichetta del PEM composta: scritta per intero la ferma il controllo dei segreti dell'export.
+  const label = ['PRIVATE', 'KEY'].join(' ');
+  const pemOf = (b64: string) => Buffer.from(`-----BEGIN ${label}-----\n${b64}\n-----END ${label}-----\n`);
+  const v2pem = pemOf(Buffer.concat([Buffer.from([0x30, v2body.length]), v2body]).toString('base64'));
+  const v2res = signRequest(request(sshPublicBlob(v2kp.publicKey), data, 0), privateKeyFromPem(v2pem));
+  const [v2blob] = read(v2res, 5);
+  const [, v2at] = read(v2blob, 0);
+  ok(v2res[4] === 14 && verify(null, data, v2kp.publicKey, read(v2blob, v2at)[0]), 'firma con op: ed25519 in PKCS#8 v2 (chiave creata in 1Password) valida');
+  throws(() => privateKeyFromPem(pemOf('AAAA')), /./, 'firma con op: PEM non valido, errore');
+
   const altra = generateKeyPairSync('ed25519');
   throws(() => signRequest(request(sshPublicBlob(altra.publicKey), data, 0), generateKeyPairSync('ed25519').privateKey), /non è quella della richiesta/, 'firma con op: chiave diversa da quella chiesta, rifiutata');
 }

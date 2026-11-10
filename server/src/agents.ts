@@ -167,21 +167,33 @@ export function setSuggestion(id: string, text: string | null) {
 }
 
 /** Server MCP visti all'avvio dell'ultima sessione di ogni progetto. */
-const mcpSeen = new Map<string, { name: string; status: string; source?: string }[]>();
-export function mcpStatus(agentId: string) { return mcpSeen.get(agentId) ?? []; }
+type McpSeen = { name: string; status: string; source?: string };
+const mcpSeen = new Map<string, { at: number; list: McpSeen[] }>();
+export function mcpStatus(agentId: string) { return mcpSeen.get(agentId)?.list ?? []; }
+function noteMcp(agentId: string, list: McpSeen[]) { mcpSeen.set(agentId, { at: Date.now(), list }); }
 
-/** Connettori di claude.ai visti nelle ultime sessioni (unione su tutti i progetti, il dato più recente vince). */
+/** Connettori di claude.ai come li ha visti l'ultima sessione (di Ciccio o di un progetto) che li ha caricati. */
 export function connectorsSeen(): { name: string; status: string }[] {
-  const out = new Map<string, string>();
-  for (const list of mcpSeen.values()) for (const m of list) {
-    if (m.source && m.source !== 'claudeai' && !/^claude\.ai /.test(m.name)) continue;
+  // Vince il dato più recente, non «collegato»: prima un connettore restava verde per una sessione vecchia anche
+  // quando tutte quelle nuove lo trovavano da autorizzare. «In collegamento» (stato all'avvio) non copre uno stato vero.
+  const out = new Map<string, string>(
+    (store.getKv<{ name: string; status: string }[]>('connectors_seen') ?? []).map((c) => [c.name, c.status]),
+  );
+  const fresh = new Set<string>();
+  for (const { list } of [...mcpSeen.values()].sort((a, b) => a.at - b.at)) for (const m of list) {
+    // Solo connettori di claude.ai: niente server MCP dei progetti, di Ciccio o dei PC.
+    if (m.source !== 'claudeai' && !/^claude\.ai /.test(m.name)) continue;
     const name = m.name.replace(/^claude\.ai /, '');
-    if (!out.has(name) || m.status === 'connected') out.set(name, m.status);
+    if (m.status === 'pending' && fresh.has(name)) continue;
+    out.set(name, m.status);
+    fresh.add(name);
   }
-  const list = [...out].map(([name, status]) => ({ name, status })).sort((a, b) => a.name.localeCompare(b.name));
-  // Dopo un riavvio del server non ci sono sessioni nuove: vale l'ultimo elenco salvato.
-  if (list.length) store.setKv('connectors_seen', list);
-  return list.length ? list : store.getKv<{ name: string; status: string }[]>('connectors_seen') ?? [];
+  // Voci salvate da versioni vecchie che contavano anche server non di claude.ai: restano solo quelle viste adesso,
+  // o tutte se dopo un riavvio non c'è ancora nessuna sessione.
+  const list = [...out].filter(([name]) => !fresh.size || fresh.has(name))
+    .map(([name, status]) => ({ name, status })).sort((a, b) => a.name.localeCompare(b.name));
+  if (fresh.size) store.setKv('connectors_seen', list);
+  return list;
 }
 
 export interface QueuedTurn { chatId: string; text: string; from: MessageRole; routine?: RoutineTag; origin?: TurnOrigin }
@@ -952,7 +964,7 @@ async function run(chatId: string, prompt: string, from: MessageRole = 'user', r
       // A fine giro, con i connettori accesi, legge quali risultano collegati.
       if (msg.type === 'result' && connectors) {
         try {
-          mcpSeen.set(row.id, (await q.mcpServerStatus()).map((m) => ({ name: m.name.replace(/^claude\.ai /, ''), status: m.status })));
+          noteMcp(row.id, (await q.mcpServerStatus()).map((m) => ({ name: m.name, status: m.status, source: m.source ?? m.scope })));
         } catch { /* stato non disponibile */ }
       }
       if (msg.type === 'result') finish();
@@ -1005,7 +1017,7 @@ export function handleMessage(t: Thread & { path: string }, state: Running, msg:
     if (m.post_tokens != null) { store.updateChat(chatId, { context_used: m.post_tokens }); publish(agentId); }
   }
   if (msg.type === 'system' && msg.subtype === 'init') {
-    mcpSeen.set(agentId, msg.mcp_servers.map((m) => ({ name: m.name, status: m.status, source: m.source })));
+    noteMcp(agentId, msg.mcp_servers.map((m) => ({ name: m.name, status: m.status, source: m.source })));
   }
   // Flusso in diretta: fase e testo che l'agente sta scrivendo.
   if (msg.type === 'stream_event' && !msg.parent_tool_use_id) {

@@ -377,10 +377,18 @@ function touchesGitConfig(cmd: string): boolean {
   return false;
 }
 
+/**
+ * File di release di qualunque repo: https://github.com/<owner>/<repo>/releases/download/<tag>/<file>. Si scaricano
+ * e basta (niente clone, niente token: curl non ha quello di gh), quindi non contano come «un altro repo». L'URL
+ * deve finire lì (spazio, virgolette, fine riga o separatore di comando): con altro in coda (`/../`, `#…`, `?…`)
+ * non vale e resta il controllo normale. Tag e nome del file non iniziano con «.» né hanno «%»: niente «..».
+ */
+const RELEASE_DOWNLOAD = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/download\/[\w+~@-][\w.+~@-]*\/[\w+~@-][\w.+~@-]*(?=$|[\s'"`;&|)])/gi;
+
 function checkCommand(cmd: string, slug: string | null): Verdict | null {
   for (const r of BLOCKED_COMMANDS) if (r.test.test(cmd)) return { action: 'deny', reason: r.reason };
   if (touchesGitConfig(cmd)) return { action: 'deny', reason: `Configurazione git di remote, credenziali o hook: la cambia solo ${OWNER}.` };
-  const other = reposIn(cmd).find((s) => s !== '{owner}/{repo}' && s !== slug);
+  const other = reposIn(cmd.replace(RELEASE_DOWNLOAD, '<release-download>')).find((s) => s !== '{owner}/{repo}' && s !== slug);
   if (other) return { action: 'deny', reason: `Lavori solo sul repo ${slug ?? 'del progetto'}: ${other} è un altro repo.` };
   return null;
 }

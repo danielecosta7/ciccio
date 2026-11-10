@@ -81,6 +81,34 @@ export function signRequest(msg: Buffer, key: KeyObject): Buffer {
   return Buffer.concat([u32(body.length), body]);
 }
 
+/** PKCS#8 ed25519: 302e 020100 300506032b6570 0422 0420 <seed di 32 byte>. */
+const ED25519_V1_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
+const ED25519_SEED = Buffer.from('300506032b6570042204', 'hex');
+
+/**
+ * Chiave privata dal PEM che dà op. Le chiavi ed25519 create in 1Password escono in PKCS#8 v2 (con la chiave
+ * pubblica in coda): BoringSSL di Bun non le legge (WRONG_TAG), Node sì. Per quelle si riscrive il PKCS#8 v1
+ * con lo stesso seed, e i buffer intermedi si azzerano.
+ */
+export function privateKeyFromPem(pem: Buffer): KeyObject {
+  try {
+    return createPrivateKey(pem);
+  } catch (err) {
+    // Il base64 fra le righe -----BEGIN/END----- del PEM.
+    const lines = pem.toString().split('\n').filter((l) => !l.startsWith('-----')).join('');
+    const der = lines ? Buffer.from(lines, 'base64') : null;
+    const at = der ? der.indexOf(ED25519_SEED) : -1;
+    if (!der || at < 0 || der[at + ED25519_SEED.length] !== 0x20 || at + ED25519_SEED.length + 33 > der.length) throw err;
+    const v1 = Buffer.concat([ED25519_V1_PREFIX, der.subarray(at + ED25519_SEED.length + 1, at + ED25519_SEED.length + 33)]);
+    try {
+      return createPrivateKey({ key: v1, format: 'der', type: 'pkcs8' });
+    } finally {
+      v1.fill(0);
+      der.fill(0);
+    }
+  }
+}
+
 function op(bin: string, args: string[], signal?: AbortSignal): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     // 1Password chiede l'approvazione (Touch ID o password): fino a due minuti.
@@ -119,7 +147,7 @@ export async function opSshSign(bin: string, msg: Buffer, signal?: AbortSignal):
   const ref = await findItem(bin, keyBlob, signal);
   const pem = await op(bin, ['read', '--no-newline', `op://${ref.vault}/${ref.id}/private_key`], signal);
   try {
-    return signRequest(msg, createPrivateKey(pem));
+    return signRequest(msg, privateKeyFromPem(pem));
   } catch (err) {
     // Chiave cambiata in 1Password dall'ultimo elenco: si rifà la ricerca la prossima volta.
     items.delete(keyBlob.toString('base64'));
